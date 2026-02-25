@@ -1,0 +1,50 @@
+import dotenv from 'dotenv';
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import apiRoutes from './routes.js';
+
+// Load .env and OVERRIDE any existing OS env vars.
+// This prevents surprises if Windows has e.g. SQL_SERVER=localhost set globally.
+dotenv.config({ override: true });
+
+const app = express();
+
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '';
+
+app.use(express.json({ limit: '1mb' }));
+
+// CORS for dev
+app.use(cors({
+  origin: CLIENT_ORIGIN || true,
+  credentials: false
+}));
+
+app.use('/api', apiRoutes);
+
+// Optional: serve built client
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const serveClient = (process.env.SERVE_CLIENT ?? 'false').toLowerCase() === 'true';
+
+if (serveClient) {
+  const clientDist = path.resolve(__dirname, '../../client/dist');
+  app.use(express.static(clientDist));
+  app.get('*', (req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+}
+
+app.listen(PORT, () => {
+  console.log(`Remitos server listening on http://localhost:${PORT}`);
+  // Helpful startup diagnostics (no password printed)
+  console.log('DB config:', {
+    SQL_SERVER: process.env.SQL_SERVER,
+    SQL_PORT: process.env.SQL_PORT,
+    SQL_DATABASE: process.env.SQL_DATABASE,
+    SQL_USER: process.env.SQL_USER,
+    SQL_ENCRYPT: process.env.SQL_ENCRYPT,
+    SQL_TRUST_SERVER_CERT: process.env.SQL_TRUST_SERVER_CERT,
+    SQL_INSTANCE_NAME: process.env.SQL_INSTANCE_NAME
+  });
+});
