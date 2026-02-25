@@ -14,6 +14,7 @@ async function httpJson(url) {
 
 export async function searchRemitosByNumero(numero) {
   const url = `${API_BASE}/api/remitos/search?numero=${encodeURIComponent(numero)}`;
+  console.log(url);
   return httpJson(url);
 }
 
