@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://remitos.onrender.com/api/$1" }
+  ]
+}
