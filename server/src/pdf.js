@@ -110,21 +110,25 @@ function headerBlock(doc, header) {
   doc.font('Helvetica').fontSize(7);
   doc.fillColor('black');
   doc.text('Código Nro 91', codeBoxX - 2, codeBoxY + 36, { width: 46, align: 'center' });
-
   // Lado derecho: Remito + numeracion
-  const rightX = x + w * 0.60;
+  // Columna derecha (alineada al borde interno para que nunca "sobresalga")
+  const rightEdge = x + w - 14; // padding dentro del marco
+  const rightColW = 220;
+  const rightColX = rightEdge - rightColW;
+
+  // Etiquetas (separadas en 2 líneas para evitar solapado)
   doc.font('Helvetica-Bold').fontSize(14);
-  doc.text('REMITO', rightX, y + 18);
+  doc.text('REMITO', rightColX, y + 10, { width: rightColW, align: 'center' });
 
   const suc = padLeft(header?.sucursal ?? '', 4);
   const nro = padLeft(header?.numero ?? '', 10);
   doc.font('Helvetica-Bold').fontSize(12);
-  doc.text(`${suc} - ${nro}`, rightX + 86, y + 18);
+  doc.text(`${suc} - ${nro}`, rightColX, y + 28, { width: rightColW, align: 'right' });
 
   doc.font('Helvetica-Bold').fontSize(12);
-  doc.text(`Fecha:  ${formatDate(header?.fecha)}`, rightX + 40, y + 48);
+  doc.text(`Fecha:  ${formatDate(header?.fecha)}`, rightColX, y + 48, { width: rightColW, align: 'right' });
   doc.font('Helvetica').fontSize(10);
-  doc.text('ORIGINAL', rightX + 150, y + 66);
+  doc.text('ORIGINAL', rightColX, y + 66, { width: rightColW, align: 'right' });
 
   // Datos fiscales empresa (derecha)
   const iva = process.env.COMPANY_IVA || 'IVA Responsable Inscripto';
@@ -132,10 +136,10 @@ function headerBlock(doc, header) {
   const iib = process.env.COMPANY_IIBB || '284463706';
   const start = process.env.COMPANY_START_DATE || '01/09/2018';
   doc.font('Helvetica').fontSize(10);
-  doc.text(iva, rightX + 96, y + 82);
-  doc.text(`CUIT:  ${cuit}`, rightX + 130, y + 96);
-  doc.text(`Ingresos Brutos: ${iib}`, rightX + 80, y + 110);
-  doc.text(`Fecha Inicio: ${start}`, rightX + 106, y + 124);
+  doc.text(iva, rightColX, y + 82, { width: rightColW, align: 'right' });
+  doc.text(`CUIT:  ${cuit}`, rightColX, y + 96, { width: rightColW, align: 'right' });
+  doc.text(`Ingresos Brutos: ${iib}`, rightColX, y + 110, { width: rightColW, align: 'right' });
+  doc.text(`Fecha Inicio: ${start}`, rightColX, y + 124, { width: rightColW, align: 'right' });
 
   return y + h;
 }
