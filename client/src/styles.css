@@ -12,12 +12,43 @@
   padding: 0 16px 40px;
 }
 
-.header h1 {
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.logo {
+  /* 3x del tamaño anterior (52px → 156px) */
+  width: 156px;
+  height: 156px;
+  border-radius: 28px;
+  background: #fff;
+  border: 1px solid #e6e8ee;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  object-fit: contain;
+}
+
+.logo.shake { animation: shake 420ms ease-in-out; }
+
+@keyframes shake {
+  0% { transform: translateX(0) rotate(0deg); }
+  15% { transform: translateX(-2px) rotate(-2deg); }
+  30% { transform: translateX(3px) rotate(2deg); }
+  45% { transform: translateX(-3px) rotate(-2deg); }
+  60% { transform: translateX(2px) rotate(1deg); }
+  75% { transform: translateX(-1px) rotate(-1deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+
+.brand-text h1 {
+
   margin: 0 0 6px;
   font-size: 26px;
 }
 
-.header p { margin: 0 0 16px; color: #444; }
+.brand-text p { margin: 0 0 16px; color: #444; }
 
 .card {
   background: #fff;
@@ -40,6 +71,21 @@
   display: grid;
   gap: 8px;
   font-weight: 600;
+}
+
+.mode {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #333;
 }
 
 .input {
@@ -144,3 +190,7 @@
 .badge-danger { background: #fff0f0; border-color: #ffd0d0; color: #7b1b1b; }
 .badge-ok { background: #f0fff5; border-color: #c8f3d7; color: #0f5c2a; }
 .badge-warn { background: #fff8e8; border-color: #ffe2a9; color: #6b4900; }
+
+
+.btn:hover { filter: brightness(0.95); }
+.btn-secondary:hover { filter: brightness(0.98); }

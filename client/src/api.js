@@ -18,6 +18,12 @@ export async function searchRemitosByNumero(numero) {
   return httpJson(url);
 }
 
+export async function searchRemitosByNv(nv) {
+  const url = `${API_BASE}/api/remitos/search-by-nv?nv=${encodeURIComponent(nv)}`;
+  console.log(url);
+  return httpJson(url);
+}
+
 export function pdfUrlForRemito({ tipo, sucursal, numero }) {
   return `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}/pdf`;
 }

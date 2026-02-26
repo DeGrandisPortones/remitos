@@ -12,6 +12,55 @@ function parseIntSafe(v) {
 // Health check
 router.get('/health', (req, res) => res.json({ ok: true }));
 
+async function fetchFacturaByNv(pool, nv) {
+  // La tabla NTASVTAS puede variar entre instalaciones (fecha/cfecha, etc.).
+  // Probamos distintos queries para ser tolerantes a schema.
+  const attempts = [
+    {
+      name: 'NTASVTAS(numero,factura,fecha)',
+      sql: `
+        SELECT TOP (10) numero, factura, fecha
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv
+        ORDER BY fecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(numero,factura,cfecha)',
+      sql: `
+        SELECT TOP (10) numero, factura, cfecha
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv
+        ORDER BY cfecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(numero,factura)',
+      sql: `
+        SELECT TOP (10) numero, factura
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv;
+      `
+    }
+  ];
+
+  for (const att of attempts) {
+    try {
+      const r = await pool.request()
+        .input('nv', sql.Int, nv)
+        .query(att.sql);
+
+      const rows = r.recordset || [];
+      const first = rows.find(x => x?.factura !== null && x?.factura !== undefined);
+      if (first) return first.factura;
+    } catch (_) {
+      // try next attempt
+      continue;
+    }
+  }
+  return null;
+}
+
 async function fetchHeaderAndItems({ tipo, sucursal, numero }) {
   const pool = await getPool();
 
@@ -166,6 +215,60 @@ router.get('/remitos/search', async (req, res) => {
       `);
 
     return res.json({ items: r.recordset });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Database error', detail: String(err.message || err) });
+  }
+});
+
+// Search remitos by Nota de Venta (NV)
+// NV -> NTASVTAS.factura -> IREMITOS.facnro -> REMITOS
+router.get('/remitos/search-by-nv', async (req, res) => {
+  const nv = parseIntSafe(req.query.nv);
+  const limit = Math.min(parseIntSafe(req.query.limit) ?? 20, 100);
+
+  if (nv === null) {
+    return res.status(400).json({ error: 'Query param "nv" must be a number.' });
+  }
+
+  try {
+    const pool = await getPool();
+    const factura = await fetchFacturaByNv(pool, nv);
+
+    // Si la NV no existe o no tiene factura asociada
+    if (!factura) {
+      return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+    }
+
+    // Traemos remitos que tengan ítems con esa factura (facnro)
+    const r = await pool.request()
+      .input('factura', sql.Int, Number(factura))
+      .input('limit', sql.Int, limit)
+      .query(`
+        SELECT TOP (@limit)
+          r.fecha, r.tipo, r.sucursal, r.numero,
+          r.cliente, r.nombre, r.direccion, r.localidad, r.cp, r.provincia,
+          r.fpago, r.vendedor, r.operador, r.zona,
+          r.iva, r.cuit, r.ibrutos,
+          r.observ, r.dirent,
+          r.anulado, r.pendiente,
+          r.transporte, r.fechaviaje,
+          r.cnro, r.cfecha, r.ctipo, r.csuc
+        FROM dbo.REMITOS r
+        INNER JOIN (
+          SELECT DISTINCT tipo, sucursal, numero
+          FROM dbo.IREMITOS
+          WHERE facnro = @factura
+        ) i ON i.tipo = r.tipo AND i.sucursal = r.sucursal AND i.numero = r.numero
+        ORDER BY r.fecha DESC;
+      `);
+
+    const items = r.recordset || [];
+    if (items.length === 0) {
+      return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+    }
+
+    return res.json({ nv, factura: Number(factura), items });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Database error', detail: String(err.message || err) });

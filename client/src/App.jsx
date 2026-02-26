@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { pdfUrlForRemito, searchRemitosByNumero } from './api.js';
+import { pdfUrlForRemito, searchRemitosByNumero, searchRemitosByNv } from './api.js';
 
 function fmtDate(v) {
   if (!v) return '';
@@ -14,14 +14,19 @@ function Badge({ children, tone = 'neutral' }) {
 
 export default function App() {
   const [numero, setNumero] = useState('');
+  const [mode, setMode] = useState('nv'); // remito | nv
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
+  const [logoShake, setLogoShake] = useState(false);
 
   const canSearch = useMemo(() => String(numero).trim().length > 0, [numero]);
 
   async function onSearch(e) {
     e.preventDefault();
+    // Animación del logo al buscar
+    setLogoShake(true);
+    window.setTimeout(() => setLogoShake(false), 420);
     setError('');
     setResults([]);
 
@@ -33,11 +38,26 @@ export default function App() {
 
     setLoading(true);
     try {
-      const data = await searchRemitosByNumero(Math.trunc(n));
+      const data = mode === 'nv'
+        ? await searchRemitosByNv(Math.trunc(n))
+        : await searchRemitosByNumero(Math.trunc(n));
       setResults(data.items || []);
-      if (!data.items || data.items.length === 0) setError('No se encontraron remitos con ese número.');
+      if (!data.items || data.items.length === 0) {
+        if (mode === 'nv') {
+          window.alert('La NV ingresada no tiene remito aún.');
+          setError('');
+        } else {
+          setError('No se encontraron remitos con ese número.');
+        }
+      }
     } catch (err) {
-      setError(err.message || 'Error');
+      const msg = err?.message || 'Error';
+      if (mode === 'nv' && String(msg).toLowerCase().includes('no tiene remito')) {
+        window.alert('La NV ingresada no tiene remito aún.');
+        setError('');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -51,18 +71,49 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <h1>Imprimir remito</h1>
-        <p>Ingresá el <b>número</b>. Si hay más de un resultado (por tipo/sucursal), elegí cuál imprimir.</p>
+        <div className="brand">
+          <img
+            className={`logo ${logoShake ? 'shake' : ''}`}
+            src="/logo.ico"
+            alt="DeGrandis Portones"
+          />
+          <div className="brand-text">
+            <h1>Imprimir remito</h1>
+          </div>
+        </div>
       </header>
 
       <form className="card" onSubmit={onSearch}>
+        <div className="mode">
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="nv"
+              checked={mode === 'nv'}
+              onChange={() => { setMode('nv'); setResults([]); setError(''); }}
+            />
+            NV
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="remito"
+              checked={mode === 'remito'}
+              onChange={() => { setMode('remito'); setResults([]); setError(''); }}
+            />
+            Remito
+          </label>
+        </div>
+
         <label className="label">
-          Número de remito
+          {mode === 'nv' ? 'Número de NV' : 'Número de remito'}
           <input
             className="input"
             value={numero}
             onChange={(e) => setNumero(e.target.value)}
-            placeholder="Ej: 670"
+            placeholder={mode === 'nv' ? 'Ej: 1234' : 'Ej: 670'}
             inputMode="numeric"
           />
         </label>
@@ -123,9 +174,6 @@ export default function App() {
         </section>
       )}
 
-      <footer className="footer">
-        <span className="small muted">Servidor: <code>/api</code> (Express) · Front: React + Vite</span>
-      </footer>
     </div>
   );
 }
