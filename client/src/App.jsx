@@ -102,7 +102,7 @@ export default function App() {
           >
             <img
               className={`logo ${logoShake === 'ipanel' ? 'shake' : ''}`}
-              src="/ipanel.svg"
+              src="/logoipanel.png"
               alt="IPANELS"
             />
           </button>
