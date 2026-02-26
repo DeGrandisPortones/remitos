@@ -61,60 +61,96 @@ async function fetchFacturaByNv(pool, nv) {
   return null;
 }
 
-async function fetchVentasObservacionByFactura(pool, factura) {
-  const fac = Number(factura);
-  if (!Number.isFinite(fac)) return null;
+async function fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc) {
+  const nro = Number(facturaNro);
+  if (!Number.isFinite(nro)) return null;
 
-  const attempts = [
-    {
-      name: 'VENTAS(numero -> observacion)',
+  const tipo = facturaTipo !== null && facturaTipo !== undefined && String(facturaTipo).trim() !== ''
+    ? String(facturaTipo).trim()
+    : null;
+  const suc = Number(facturaSuc);
+  const hasSuc = Number.isFinite(suc);
+
+  // Algunos esquemas guardan la factura en (tipo,sucursal,numero) y otros en (ctipo,csuc,cnro).
+  // Además, puede haber duplicados por tipo/sucursal; por eso pedimos varios y tomamos el primero no vacío.
+  const obsExpr = `COALESCE(NULLIF(LTRIM(RTRIM(observacion)), ''), NULLIF(LTRIM(RTRIM(observ)), ''))`;
+
+  const attempts = [];
+
+  // Match exacto por tipo/sucursal/numero
+  {
+    let where = 'numero = @nro';
+    if (tipo) where += ' AND tipo = @tipo';
+    if (hasSuc) where += ' AND sucursal = @suc';
+    attempts.push({
+      name: 'VENTAS(tipo/sucursal/numero)',
       sql: `
-        SELECT TOP (1) observacion
+        SELECT TOP (50) ${obsExpr} AS obs
         FROM dbo.VENTAS
-        WHERE numero = @factura;
+        WHERE ${where}
+        ORDER BY fecha DESC;
       `
-    },
-    {
-      name: 'VENTAS(factura -> observacion)',
+    });
+  }
+
+  // Match exacto por ctipo/csuc/cnro
+  {
+    let where = 'cnro = @nro';
+    if (tipo) where += ' AND ctipo = @tipo';
+    if (hasSuc) where += ' AND csuc = @suc';
+    attempts.push({
+      name: 'VENTAS(ctipo/csuc/cnro)',
       sql: `
-        SELECT TOP (1) observacion
+        SELECT TOP (50) ${obsExpr} AS obs
         FROM dbo.VENTAS
-        WHERE factura = @factura;
+        WHERE ${where}
+        ORDER BY cfecha DESC;
       `
-    },
-    {
-      name: 'VENTAS(cnro -> observacion)',
-      sql: `
-        SELECT TOP (1) observacion
-        FROM dbo.VENTAS
-        WHERE cnro = @factura;
-      `
-    },
-    {
-      name: 'VENTAS(facnro -> observacion)',
-      sql: `
-        SELECT TOP (1) observacion
-        FROM dbo.VENTAS
-        WHERE facnro = @factura;
-      `
-    }
-  ];
+    });
+  }
+
+  // Fallbacks (sin tipo/sucursal)
+  attempts.push({
+    name: 'VENTAS(numero)',
+    sql: `
+      SELECT TOP (100) ${obsExpr} AS obs
+      FROM dbo.VENTAS
+      WHERE numero = @nro
+      ORDER BY fecha DESC;
+    `
+  });
+
+  attempts.push({
+    name: 'VENTAS(cnro)',
+    sql: `
+      SELECT TOP (100) ${obsExpr} AS obs
+      FROM dbo.VENTAS
+      WHERE cnro = @nro
+      ORDER BY cfecha DESC;
+    `
+  });
 
   for (const att of attempts) {
     try {
-      const r = await pool.request()
-        .input('factura', sql.Int, fac)
-        .query(att.sql);
+      let req = pool.request().input('nro', sql.Int, Math.trunc(nro));
+      if (tipo) req = req.input('tipo', sql.VarChar(10), tipo);
+      if (hasSuc) req = req.input('suc', sql.Int, Math.trunc(suc));
 
-      const row = r.recordset?.[0];
-      const obs = row?.observacion;
-      if (obs !== null && obs !== undefined && String(obs).trim() !== '') return obs;
+      const r = await req.query(att.sql);
+      const rows = r.recordset || [];
+      const firstNonEmpty = rows
+        .map(x => x?.obs)
+        .find(v => v !== null && v !== undefined && String(v).trim() !== '');
+
+      if (firstNonEmpty) return firstNonEmpty;
     } catch (_) {
       continue;
     }
   }
+
   return null;
 }
+
 
 
 async function fetchHeaderAndItems({ tipo, sucursal, numero }) {
@@ -368,7 +404,9 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
     // Observación desde VENTAS usando el nro de factura (cnro / facnro)
     const pool = await getPool();
     const facturaNro = header?.cnro ?? items?.[0]?.facnro;
-    const ventas_observacion = await fetchVentasObservacionByFactura(pool, facturaNro);
+    const facturaTipo = header?.ctipo ?? items?.[0]?.ctipo;
+    const facturaSuc = header?.csuc ?? items?.[0]?.csuc;
+    const ventas_observacion = await fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc);
 
     const pdfHeader = { ...header, ventas_observacion };
     const pdfBuffer = await buildRemitoPdf({ header: pdfHeader, items });
