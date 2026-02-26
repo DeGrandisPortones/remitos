@@ -9,6 +9,16 @@ function parseIntSafe(v) {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
+
+function resolveDatabase(req) {
+  const raw = (req.query.empresa ?? req.query.company ?? req.headers['x-empresa'] ?? req.headers['x-company'] ?? '').toString().trim().toLowerCase();
+  if (raw === 'ipanel' || raw === 'ipanels' || raw === 'paneles' || raw === 'panel') return 'Paneles';
+  if (raw === 'portones' || raw === 'porton' || raw === 'dg' || raw === 'degrandis') return 'Portones';
+  // Default: el database configurado en el servicio (Render) o Portones.
+  return process.env.SQL_DATABASE || 'Portones';
+}
+
+
 // Health check
 router.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -153,8 +163,7 @@ async function fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, fa
 
 
 
-async function fetchHeaderAndItems({ tipo, sucursal, numero }) {
-  const pool = await getPool();
+async function fetchHeaderAndItems(pool, { tipo, sucursal, numero }) {
 
   async function fetchItems(queryInputs, whereSql) {
     // Intentamos enriquecer con descripción desde tablas típicas (si existen).
@@ -287,7 +296,8 @@ router.get('/remitos/search', async (req, res) => {
   }
 
   try {
-    const pool = await getPool();
+    const db = resolveDatabase(req);
+    const pool = await getPool(db);
     const r = await pool.request()
       .input('numero', sql.Int, numero)
       .input('limit', sql.Int, limit)
@@ -324,7 +334,8 @@ router.get('/remitos/search-by-nv', async (req, res) => {
   }
 
   try {
-    const pool = await getPool();
+    const db = resolveDatabase(req);
+    const pool = await getPool(db);
     const factura = await fetchFacturaByNv(pool, nv);
 
     // Si la NV no existe o no tiene factura asociada
@@ -378,7 +389,9 @@ router.get('/remitos/:tipo/:sucursal/:numero', async (req, res) => {
   }
 
   try {
-    const { header, items } = await fetchHeaderAndItems({ tipo, sucursal, numero });
+    const db = resolveDatabase(req);
+    const pool = await getPool(db);
+    const { header, items } = await fetchHeaderAndItems(pool, { tipo, sucursal, numero });
     if (!header) return res.status(404).json({ error: 'Remito not found' });
     return res.json({ header, items });
   } catch (err) {
@@ -398,11 +411,12 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
   }
 
   try {
-    const { header, items } = await fetchHeaderAndItems({ tipo, sucursal, numero });
+    const db = resolveDatabase(req);
+    const pool = await getPool(db);
+    const { header, items } = await fetchHeaderAndItems(pool, { tipo, sucursal, numero });
     if (!header) return res.status(404).json({ error: 'Remito not found' });
 
     // Observación desde VENTAS usando el nro de factura (cnro / facnro)
-    const pool = await getPool();
     const facturaNro = header?.cnro ?? items?.[0]?.facnro;
     const facturaTipo = header?.ctipo ?? items?.[0]?.ctipo;
     const facturaSuc = header?.csuc ?? items?.[0]?.csuc;

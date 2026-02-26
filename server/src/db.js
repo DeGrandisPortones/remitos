@@ -1,15 +1,15 @@
 import sql from 'mssql';
 
-let poolPromise = null;
+const pools = new Map();
 
 function required(name, value) {
   if (!value) throw new Error(`Missing required env var: ${name}`);
   return value;
 }
 
-export function getSqlConfig() {
+export function getSqlConfig(databaseOverride) {
   const server = required('SQL_SERVER', process.env.SQL_SERVER);
-  const database = required('SQL_DATABASE', process.env.SQL_DATABASE);
+  const database = databaseOverride || required('SQL_DATABASE', process.env.SQL_DATABASE);
   const user = required('SQL_USER', process.env.SQL_USER);
   const password = required('SQL_PASSWORD', process.env.SQL_PASSWORD);
 
@@ -37,11 +37,15 @@ export function getSqlConfig() {
   };
 }
 
-export async function getPool() {
-  if (!poolPromise) {
-    poolPromise = sql.connect(getSqlConfig());
+export async function getPool(databaseOverride) {
+  const dbName = databaseOverride || process.env.SQL_DATABASE;
+  if (!dbName) throw new Error('Missing SQL_DATABASE (and no override provided).');
+
+  if (!pools.has(dbName)) {
+    const pool = new sql.ConnectionPool(getSqlConfig(dbName));
+    pools.set(dbName, pool.connect());
   }
-  return poolPromise;
+  return pools.get(dbName);
 }
 
 export { sql };

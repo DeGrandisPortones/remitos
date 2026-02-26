@@ -15,18 +15,20 @@ function Badge({ children, tone = 'neutral' }) {
 export default function App() {
   const [numero, setNumero] = useState('');
   const [mode, setMode] = useState('nv'); // remito | nv
+  const [empresa, setEmpresa] = useState('portones'); // portones | ipanel
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
-  const [logoShake, setLogoShake] = useState(false);
+  const [logoShake, setLogoShake] = useState(null); // 'portones' | 'ipanel' | null
 
   const canSearch = useMemo(() => String(numero).trim().length > 0, [numero]);
 
   async function onSearch(e) {
     e.preventDefault();
-    // Animación del logo al buscar
-    setLogoShake(true);
-    window.setTimeout(() => setLogoShake(false), 420);
+    // Animación del logo al buscar (según empresa seleccionada)
+    setLogoShake(empresa);
+    window.setTimeout(() => setLogoShake(null), 420);
+
     setError('');
     setResults([]);
 
@@ -39,8 +41,9 @@ export default function App() {
     setLoading(true);
     try {
       const data = mode === 'nv'
-        ? await searchRemitosByNv(Math.trunc(n))
-        : await searchRemitosByNumero(Math.trunc(n));
+        ? await searchRemitosByNv(Math.trunc(n), empresa)
+        : await searchRemitosByNumero(Math.trunc(n), empresa);
+
       setResults(data.items || []);
       if (!data.items || data.items.length === 0) {
         if (mode === 'nv') {
@@ -64,19 +67,46 @@ export default function App() {
   }
 
   function openPdf(r) {
-    const url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero });
+    const url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa });
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function pickEmpresa(next) {
+    setEmpresa(next);
+    setResults([]);
+    setError('');
   }
 
   return (
     <div className="page">
       <header className="header">
         <div className="brand">
-          <img
-            className={`logo ${logoShake ? 'shake' : ''}`}
-            src="/logo.ico"
-            alt="DeGrandis Portones"
-          />
+          <button
+            type="button"
+            className={`logo-btn ${empresa === 'portones' ? 'active' : ''}`}
+            onClick={() => pickEmpresa('portones')}
+            title="De Grandis Portones"
+          >
+            <img
+              className={`logo ${logoShake === 'portones' ? 'shake' : ''}`}
+              src="/logo.ico"
+              alt="De Grandis Portones"
+            />
+          </button>
+
+          <button
+            type="button"
+            className={`logo-btn ${empresa === 'ipanel' ? 'active' : ''}`}
+            onClick={() => pickEmpresa('ipanel')}
+            title="IPANELS"
+          >
+            <img
+              className={`logo ${logoShake === 'ipanel' ? 'shake' : ''}`}
+              src="/ipanel.svg"
+              alt="IPANELS"
+            />
+          </button>
+
           <div className="brand-text">
             <h1>Imprimir remito</h1>
           </div>
