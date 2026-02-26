@@ -61,6 +61,62 @@ async function fetchFacturaByNv(pool, nv) {
   return null;
 }
 
+async function fetchVentasObservacionByFactura(pool, factura) {
+  const fac = Number(factura);
+  if (!Number.isFinite(fac)) return null;
+
+  const attempts = [
+    {
+      name: 'VENTAS(numero -> observacion)',
+      sql: `
+        SELECT TOP (1) observacion
+        FROM dbo.VENTAS
+        WHERE numero = @factura;
+      `
+    },
+    {
+      name: 'VENTAS(factura -> observacion)',
+      sql: `
+        SELECT TOP (1) observacion
+        FROM dbo.VENTAS
+        WHERE factura = @factura;
+      `
+    },
+    {
+      name: 'VENTAS(cnro -> observacion)',
+      sql: `
+        SELECT TOP (1) observacion
+        FROM dbo.VENTAS
+        WHERE cnro = @factura;
+      `
+    },
+    {
+      name: 'VENTAS(facnro -> observacion)',
+      sql: `
+        SELECT TOP (1) observacion
+        FROM dbo.VENTAS
+        WHERE facnro = @factura;
+      `
+    }
+  ];
+
+  for (const att of attempts) {
+    try {
+      const r = await pool.request()
+        .input('factura', sql.Int, fac)
+        .query(att.sql);
+
+      const row = r.recordset?.[0];
+      const obs = row?.observacion;
+      if (obs !== null && obs !== undefined && String(obs).trim() !== '') return obs;
+    } catch (_) {
+      continue;
+    }
+  }
+  return null;
+}
+
+
 async function fetchHeaderAndItems({ tipo, sucursal, numero }) {
   const pool = await getPool();
 
@@ -309,7 +365,13 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
     const { header, items } = await fetchHeaderAndItems({ tipo, sucursal, numero });
     if (!header) return res.status(404).json({ error: 'Remito not found' });
 
-    const pdfBuffer = await buildRemitoPdf({ header, items });
+    // Observación desde VENTAS usando el nro de factura (cnro / facnro)
+    const pool = await getPool();
+    const facturaNro = header?.cnro ?? items?.[0]?.facnro;
+    const ventas_observacion = await fetchVentasObservacionByFactura(pool, facturaNro);
+
+    const pdfHeader = { ...header, ventas_observacion };
+    const pdfBuffer = await buildRemitoPdf({ header: pdfHeader, items });
     const filename = `remito-${tipo}-${sucursal}-${numero}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
