@@ -316,11 +316,15 @@ function signatureBlock(doc, header, yTop) {
   doc.lineWidth(1);
   doc.moveTo(x, yTop).lineTo(x + w, yTop).stroke();
 
-  // Leyenda inferior (observación de VENTAS si existe; fallback al texto anterior)
+  // Leyenda inferior:
+  // - Portones: usar observación de VENTAS (header.ventas_observacion)
+  // - Paneles: usar observación del remito (header.observ)
+  // - fallback: texto anterior
   const ventasObs = normalizeText(header?.ventas_observacion);
+  const remitoObs = normalizeText(header?.observ);
   const nv = header?.numerov ? `NV ${header.numerov}. ` : '';
   const fallbackSubject = `${nv}PORTON DE ${normalizeText(header?.nombre)}.`.trim();
-  const subject = ventasObs || fallbackSubject;
+  const subject = ventasObs || remitoObs || fallbackSubject;
   doc.fillColor('black');
   doc.font('Helvetica').fontSize(10.5);
   doc.text(subject, x + 6, yTop + 6, { width: w - 12 });

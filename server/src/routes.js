@@ -71,6 +71,55 @@ async function fetchFacturaByNv(pool, nv) {
   return null;
 }
 
+
+async function fetchRemitoByNvPaneles(pool, nv) {
+  // Paneles: NV -> NTASVTAS.remito -> REMITOS/IREMITOS(numero)
+  const attempts = [
+    {
+      name: 'NTASVTAS(numero,remito,fecha)',
+      sql: `
+        SELECT TOP (10) numero, remito, fecha
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv AND remito IS NOT NULL
+        ORDER BY fecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(numero,remito,cfecha)',
+      sql: `
+        SELECT TOP (10) numero, remito, cfecha
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv AND remito IS NOT NULL
+        ORDER BY cfecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(numero,remito)',
+      sql: `
+        SELECT TOP (10) numero, remito
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv AND remito IS NOT NULL;
+      `
+    }
+  ];
+
+  for (const att of attempts) {
+    try {
+      const r = await pool.request()
+        .input('nv', sql.Int, nv)
+        .query(att.sql);
+
+      const rows = r.recordset || [];
+      const first = rows.find(x => x?.remito !== null && x?.remito !== undefined);
+      if (first) return first.remito;
+    } catch (_) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 async function fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc) {
   const nro = Number(facturaNro);
   if (!Number.isFinite(nro)) return null;
@@ -336,6 +385,40 @@ router.get('/remitos/search-by-nv', async (req, res) => {
   try {
     const db = resolveDatabase(req);
     const pool = await getPool(db);
+    // Paneles: NV -> NTASVTAS.remito -> REMITOS/IREMITOS(numero)
+    if (String(db).toLowerCase() === 'paneles') {
+      const remito = await fetchRemitoByNvPaneles(pool, nv);
+      if (!remito) {
+        return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+      }
+
+      const r = await pool.request()
+        .input('remito', sql.Int, Number(remito))
+        .input('limit', sql.Int, limit)
+        .query(`
+          SELECT TOP (@limit)
+            fecha, tipo, sucursal, numero,
+            cliente, nombre, direccion, localidad, cp, provincia,
+            fpago, vendedor, operador, zona,
+            iva, cuit, ibrutos,
+            observ, dirent,
+            anulado, pendiente,
+            transporte, fechaviaje,
+            cnro, cfecha, ctipo, csuc
+          FROM dbo.REMITOS
+          WHERE numero = @remito
+          ORDER BY fecha DESC;
+        `);
+
+      const items = r.recordset || [];
+      if (items.length === 0) {
+        return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+      }
+
+      return res.json({ nv, remito: Number(remito), items });
+    }
+
+    // Portones (default): NV -> NTASVTAS.factura -> IREMITOS.facnro -> REMITOS
     const factura = await fetchFacturaByNv(pool, nv);
 
     // Si la NV no existe o no tiene factura asociada
@@ -416,11 +499,17 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
     const { header, items } = await fetchHeaderAndItems(pool, { tipo, sucursal, numero });
     if (!header) return res.status(404).json({ error: 'Remito not found' });
 
-    // Observación desde VENTAS usando el nro de factura (cnro / facnro)
-    const facturaNro = header?.cnro ?? items?.[0]?.facnro;
-    const facturaTipo = header?.ctipo ?? items?.[0]?.ctipo;
-    const facturaSuc = header?.csuc ?? items?.[0]?.csuc;
-    const ventas_observacion = await fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc);
+    // Observación para leyenda inferior:
+    // - Portones: desde VENTAS.observacion (por factura)
+    // - Paneles: desde REMITOS.observ (ya viene en header)
+    let ventas_observacion = null;
+
+    if (String(db).toLowerCase() !== 'paneles') {
+      const facturaNro = header?.cnro ?? items?.[0]?.facnro;
+      const facturaTipo = header?.ctipo ?? items?.[0]?.ctipo;
+      const facturaSuc = header?.csuc ?? items?.[0]?.csuc;
+      ventas_observacion = await fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc);
+    }
 
     const pdfHeader = { ...header, ventas_observacion };
     const pdfBuffer = await buildRemitoPdf({ header: pdfHeader, items });
