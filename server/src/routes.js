@@ -120,6 +120,114 @@ async function fetchRemitoByNvPaneles(pool, nv) {
   return null;
 }
 
+
+async function fetchNtasObsByNvPaneles(pool, nv) {
+  // Paneles: texto inferior del remito debe venir de NTASVTAS.observ (o NTASVTAS.observacion)
+  const obsExpr = `COALESCE(NULLIF(LTRIM(RTRIM(observ)), ''), NULLIF(LTRIM(RTRIM(observacion)), '')) AS obs`;
+
+  const attempts = [
+    {
+      name: 'NTASVTAS(numero,observ,fecha)',
+      sql: `
+        SELECT TOP (20) numero, ${obsExpr}, fecha
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv
+        ORDER BY fecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(numero,observ,cfecha)',
+      sql: `
+        SELECT TOP (20) numero, ${obsExpr}, cfecha
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv
+        ORDER BY cfecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(numero,observ)',
+      sql: `
+        SELECT TOP (20) numero, ${obsExpr}
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv;
+      `
+    }
+  ];
+
+  for (const att of attempts) {
+    try {
+      const r = await pool.request()
+        .input('nv', sql.Int, nv)
+        .query(att.sql);
+
+      const rows = r.recordset || [];
+      const firstNonEmpty = rows
+        .map(x => x?.obs)
+        .find(v => v !== null && v !== undefined && String(v).trim() !== '');
+
+      if (firstNonEmpty) return firstNonEmpty;
+    } catch (_) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function fetchNtasObsAndNvByRemitoPaneles(pool, remitoNro) {
+  // Fallback si no nos pasan NV en la URL del PDF: buscamos por remito.
+  const nro = Number(remitoNro);
+  if (!Number.isFinite(nro)) return null;
+
+  const obsExpr = `COALESCE(NULLIF(LTRIM(RTRIM(observ)), ''), NULLIF(LTRIM(RTRIM(observacion)), '')) AS obs`;
+
+  const attempts = [
+    {
+      name: 'NTASVTAS(remito,observ,fecha)',
+      sql: `
+        SELECT TOP (20) numero, ${obsExpr}, fecha
+        FROM dbo.NTASVTAS
+        WHERE remito = @remito
+        ORDER BY fecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(remito,observ,cfecha)',
+      sql: `
+        SELECT TOP (20) numero, ${obsExpr}, cfecha
+        FROM dbo.NTASVTAS
+        WHERE remito = @remito
+        ORDER BY cfecha DESC;
+      `
+    },
+    {
+      name: 'NTASVTAS(remito,observ)',
+      sql: `
+        SELECT TOP (20) numero, ${obsExpr}
+        FROM dbo.NTASVTAS
+        WHERE remito = @remito;
+      `
+    }
+  ];
+
+  for (const att of attempts) {
+    try {
+      const r = await pool.request()
+        .input('remito', sql.Int, Math.trunc(nro))
+        .query(att.sql);
+
+      const rows = r.recordset || [];
+      const row = rows.find(x => x?.obs !== null && x?.obs !== undefined && String(x.obs).trim() !== '');
+      if (row) return { nv: row.numero, obs: row.obs };
+    } catch (_) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+
 async function fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc) {
   const nro = Number(facturaNro);
   if (!Number.isFinite(nro)) return null;
@@ -501,17 +609,33 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
 
     // Observación para leyenda inferior:
     // - Portones: desde VENTAS.observacion (por factura)
-    // - Paneles: desde REMITOS.observ (ya viene en header)
+    // - Paneles (IPANEL): desde NTASVTAS.observ de la NV (si se busca por NV), o por remito como fallback
     let ventas_observacion = null;
+    let numerov = header?.numerov;
 
-    if (String(db).toLowerCase() !== 'paneles') {
+    if (String(db).toLowerCase() === 'paneles') {
+      let nv = parseIntSafe(req.query.nv);
+      // 1) Si viene NV explícita (cuando se buscó por NV), usamos esa fila.
+      if (nv !== null) {
+        ventas_observacion = await fetchNtasObsByNvPaneles(pool, nv);
+        numerov = numerov ?? nv;
+      }
+      // 2) Fallback: inferir NV por remito (por si imprimen desde búsqueda por remito)
+      if (!ventas_observacion) {
+        const byRem = await fetchNtasObsAndNvByRemitoPaneles(pool, numero);
+        if (byRem?.obs) {
+          ventas_observacion = byRem.obs;
+          numerov = numerov ?? byRem.nv;
+        }
+      }
+    } else {
       const facturaNro = header?.cnro ?? items?.[0]?.facnro;
       const facturaTipo = header?.ctipo ?? items?.[0]?.ctipo;
       const facturaSuc = header?.csuc ?? items?.[0]?.csuc;
       ventas_observacion = await fetchVentasObservacionByFactura(pool, facturaNro, facturaTipo, facturaSuc);
     }
 
-    const pdfHeader = { ...header, ventas_observacion };
+    const pdfHeader = { ...header, ventas_observacion, numerov };
     const pdfBuffer = await buildRemitoPdf({ header: pdfHeader, items });
     const filename = `remito-${tipo}-${sucursal}-${numero}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');

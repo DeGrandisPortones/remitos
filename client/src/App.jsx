@@ -16,6 +16,7 @@ export default function App() {
   const [numero, setNumero] = useState('');
   const [mode, setMode] = useState('nv'); // remito | nv
   const [empresa, setEmpresa] = useState('portones'); // portones | ipanel
+  const [lastNv, setLastNv] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
@@ -37,6 +38,8 @@ export default function App() {
       setError('Ingresá un número válido.');
       return;
     }
+
+    if (mode === 'nv') setLastNv(Math.trunc(n)); else setLastNv(null);
 
     setLoading(true);
     try {
@@ -67,12 +70,13 @@ export default function App() {
   }
 
   function openPdf(r) {
-    const url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa });
+    const url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa, nv: (mode === 'nv' ? lastNv : null) });
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   function pickEmpresa(next) {
     setEmpresa(next);
+    setLastNv(null);
     setResults([]);
     setError('');
   }
@@ -121,7 +125,7 @@ export default function App() {
               name="mode"
               value="nv"
               checked={mode === 'nv'}
-              onChange={() => { setMode('nv'); setResults([]); setError(''); }}
+              onChange={() => { setMode('nv'); setLastNv(null); setResults([]); setError(''); }}
             />
             NV
           </label>
@@ -131,7 +135,7 @@ export default function App() {
               name="mode"
               value="remito"
               checked={mode === 'remito'}
-              onChange={() => { setMode('remito'); setResults([]); setError(''); }}
+              onChange={() => { setMode('remito'); setLastNv(null); setResults([]); setError(''); }}
             />
             Remito
           </label>
@@ -151,7 +155,7 @@ export default function App() {
           <button className="btn" disabled={!canSearch || loading} type="submit">
             {loading ? 'Buscando…' : 'Buscar'}
           </button>
-          <button className="btn btn-secondary" type="button" onClick={() => { setNumero(''); setResults([]); setError(''); }}>
+          <button className="btn btn-secondary" type="button" onClick={() => { setNumero(''); setLastNv(null); setResults([]); setError(''); }}>
             Limpiar
           </button>
         </div>

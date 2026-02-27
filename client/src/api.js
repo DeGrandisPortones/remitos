@@ -30,9 +30,12 @@ export async function searchRemitosByNv(nv, empresa) {
   return httpJson(url);
 }
 
-export function pdfUrlForRemito({ tipo, sucursal, numero, empresa }) {
-  const base = `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}/pdf`;
-  return withEmpresa(base, empresa);
+export function pdfUrlForRemito({ tipo, sucursal, numero, empresa, nv }) {
+  let url = `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}/pdf`;
+  if (nv !== null && nv !== undefined && String(nv).trim() !== '') {
+    url += `?nv=${encodeURIComponent(nv)}`;
+  }
+  return withEmpresa(url, empresa);
 }
 
 export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
