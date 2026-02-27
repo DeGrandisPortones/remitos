@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { pdfUrlForRemito, searchRemitosByNumero, searchRemitosByNv } from './api.js';
 
 function fmtDate(v) {
@@ -16,11 +16,14 @@ export default function App() {
   const [numero, setNumero] = useState('');
   const [mode, setMode] = useState('nv'); // remito | nv
   const [empresa, setEmpresa] = useState('portones'); // portones | ipanel
-  const [lastNv, setLastNv] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
   const [logoShake, setLogoShake] = useState(null); // 'portones' | 'ipanel' | null
+
+  useEffect(() => {
+    document.title = empresa === 'portones' ? 'De Grandis Portones' : 'Ipanels';
+  }, [empresa]);
 
   const canSearch = useMemo(() => String(numero).trim().length > 0, [numero]);
 
@@ -38,8 +41,6 @@ export default function App() {
       setError('Ingresá un número válido.');
       return;
     }
-
-    if (mode === 'nv') setLastNv(Math.trunc(n)); else setLastNv(null);
 
     setLoading(true);
     try {
@@ -70,13 +71,12 @@ export default function App() {
   }
 
   function openPdf(r) {
-    const url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa, nv: (mode === 'nv' ? lastNv : null) });
+    const url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa });
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   function pickEmpresa(next) {
     setEmpresa(next);
-    setLastNv(null);
     setResults([]);
     setError('');
   }
@@ -112,7 +112,7 @@ export default function App() {
           </button>
 
           <div className="brand-text">
-            <h1>Imprimir remito</h1>
+            <h1>{empresa === 'portones' ? 'De Grandis Portones' : 'Ipanels'}</h1>
           </div>
         </div>
       </header>
@@ -125,7 +125,7 @@ export default function App() {
               name="mode"
               value="nv"
               checked={mode === 'nv'}
-              onChange={() => { setMode('nv'); setLastNv(null); setResults([]); setError(''); }}
+              onChange={() => { setMode('nv'); setResults([]); setError(''); }}
             />
             NV
           </label>
@@ -135,7 +135,7 @@ export default function App() {
               name="mode"
               value="remito"
               checked={mode === 'remito'}
-              onChange={() => { setMode('remito'); setLastNv(null); setResults([]); setError(''); }}
+              onChange={() => { setMode('remito'); setResults([]); setError(''); }}
             />
             Remito
           </label>
@@ -155,7 +155,7 @@ export default function App() {
           <button className="btn" disabled={!canSearch || loading} type="submit">
             {loading ? 'Buscando…' : 'Buscar'}
           </button>
-          <button className="btn btn-secondary" type="button" onClick={() => { setNumero(''); setLastNv(null); setResults([]); setError(''); }}>
+          <button className="btn btn-secondary" type="button" onClick={() => { setNumero(''); setResults([]); setError(''); }}>
             Limpiar
           </button>
         </div>
