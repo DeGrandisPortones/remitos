@@ -582,4 +582,84 @@ const pdfHeader = { ...header, ventas_observacion, numerov };
   }
 });
 
+
+// Generate PDF from user-provided data (Custom remito)
+// POST /api/remitos/custom/pdf?empresa=portones|ipanel
+router.post('/remitos/custom/pdf', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const hIn = body.header || body.remito || {};
+    const itemsIn = Array.isArray(body.items) ? body.items : (Array.isArray(body.detalle) ? body.detalle : []);
+
+    const tipo = String(hIn.tipo ?? 'RR').trim().toUpperCase().slice(0, 10);
+    const sucursal = parseIntSafe(hIn.sucursal) ?? 1;
+    const numero = parseIntSafe(hIn.numero);
+
+    if (!tipo || sucursal === null || numero === null) {
+      return res.status(400).json({ error: 'Datos inválidos. Requiere tipo, sucursal y numero.' });
+    }
+
+    const fecha = hIn.fecha ? new Date(hIn.fecha) : new Date();
+    const fechaOk = Number.isFinite(fecha.getTime()) ? fecha.toISOString() : new Date().toISOString();
+
+    const cnro = hIn.cnro !== undefined && hIn.cnro !== null && String(hIn.cnro).trim() !== ''
+      ? (parseIntSafe(hIn.cnro) ?? null)
+      : null;
+
+    const numerov = hIn.nv !== undefined && hIn.nv !== null && String(hIn.nv).trim() !== ''
+      ? (parseIntSafe(hIn.nv) ?? null)
+      : (hIn.numerov !== undefined && hIn.numerov !== null && String(hIn.numerov).trim() !== '' ? (parseIntSafe(hIn.numerov) ?? null) : null);
+
+    const observText = String(hIn.observ ?? hIn.observacion ?? hIn.texto ?? '').trim();
+
+    const header = {
+      tipo,
+      sucursal,
+      numero,
+      fecha: fechaOk,
+      cnro,
+      numerov,
+      cliente: String(hIn.cliente ?? '').slice(0, 30),
+      nombre: String(hIn.nombre ?? '').slice(0, 120),
+      direccion: String(hIn.direccion ?? '').slice(0, 140),
+      localidad: String(hIn.localidad ?? '').slice(0, 80),
+      provincia: String(hIn.provincia ?? '').slice(0, 10),
+      cp: String(hIn.cp ?? '').slice(0, 12),
+      iva: String(hIn.iva ?? '').slice(0, 10),
+      cuit: String(hIn.cuit ?? '').slice(0, 20),
+      ibrutos: String(hIn.ibrutos ?? '').slice(0, 30),
+      operador: String(hIn.operador ?? '').slice(0, 40),
+      // Para la leyenda inferior, pdf.js prioriza ventas_observacion.
+      ventas_observacion: observText,
+      observ: observText,
+    };
+
+    if (!header.nombre || header.nombre.trim() === '') {
+      return res.status(400).json({ error: 'Completá el nombre del cliente.' });
+    }
+
+    const items = (itemsIn || [])
+      .slice(0, 250)
+      .map((it) => ({
+        producto: String(it.producto ?? it.codigo ?? it.cod ?? '').trim().slice(0, 30),
+        cantidad: Number(it.cantidad ?? it.qty ?? it.cant ?? 0),
+        descripcion: String(it.descripcion ?? it.detalle ?? it.desc ?? '').trim().slice(0, 500),
+      }))
+      .filter((it) => it.producto || it.descripcion);
+
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'Agregá al menos 1 ítem.' });
+    }
+
+    const pdfBuffer = await buildRemitoPdf({ header, items });
+    const filename = `remito-custom-${tipo}-${sucursal}-${numero}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'PDF generation error', detail: String(err.message || err) });
+  }
+});
+
 export default router;

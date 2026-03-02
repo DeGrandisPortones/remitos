@@ -214,3 +214,57 @@
 
 .btn:hover { filter: brightness(0.95); }
 .btn-secondary:hover { filter: brightness(0.98); }
+
+
+/* Custom remito */
+.custom {
+  margin-top: 12px;
+}
+
+.section-title {
+  margin: 10px 0 10px;
+  font-weight: 800;
+  font-size: 14px;
+  color: #222;
+}
+
+.custom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.grid-span-2 { grid-column: span 2; }
+
+.items {
+  display: grid;
+  gap: 10px;
+}
+
+.item-row {
+  display: grid;
+  grid-template-columns: 120px 100px 1fr 90px;
+  gap: 10px;
+  align-items: center;
+}
+
+.item-prod { }
+.item-qty { }
+.item-desc { }
+
+.items-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+@media (max-width: 860px) {
+  .custom-grid { grid-template-columns: 1fr; }
+  .item-row { grid-template-columns: 1fr; }
+}

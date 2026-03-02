@@ -39,3 +39,24 @@ export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
   const base = `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}`;
   return withEmpresa(base, empresa);
 }
+
+
+export async function generateCustomRemitoPdf({ empresa, header, items }) {
+  const base = `${API_BASE}/api/remitos/custom/pdf`;
+  const url = withEmpresa(base, empresa);
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ header, items }),
+  });
+
+  if (!r.ok) {
+    const text = await r.text();
+    let data;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    const msg = data?.error || `HTTP ${r.status}`;
+    throw new Error(msg);
+  }
+
+  return r.blob();
+}
