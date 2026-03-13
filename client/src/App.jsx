@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  generateCustomRemitoPdf,
   pdfUrlForRemito,
+  pingServer,
   searchRemitosByNumero,
   searchRemitosByNv,
-  generateCustomRemitoPdf,
+  warmupNv,
 } from './api.js';
+
+const WARMUP_EMPRESA = 'portones';
+const WARMUP_NV = 4000;
+const STATUS_REFRESH_MS = 60000;
 
 function fmtDate(v) {
   if (!v) return '';
@@ -25,6 +31,18 @@ function todayIsoDate() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function statusLabel(serverStatus) {
+  if (serverStatus === 'online') return 'Online';
+  if (serverStatus === 'offline') return 'Offline';
+  return 'Conectando…';
+}
+
+function statusTone(serverStatus) {
+  if (serverStatus === 'online') return 'ok';
+  if (serverStatus === 'offline') return 'danger';
+  return 'warn';
+}
+
 export default function App() {
   const [numero, setNumero] = useState('');
   const [mode, setMode] = useState('nv'); // remito | nv | custom
@@ -33,6 +51,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
   const [logoShake, setLogoShake] = useState(null); // 'portones' | 'ipanel' | null
+  const [serverStatus, setServerStatus] = useState('checking'); // checking | online | offline
 
   const [customHeader, setCustomHeader] = useState(() => ({
     tipo: 'RR',
@@ -61,6 +80,38 @@ export default function App() {
   useEffect(() => {
     document.title = empresa === 'portones' ? 'De Grandis Portones' : 'Ipanels';
   }, [empresa]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshServerStatus() {
+      if (!cancelled) setServerStatus('checking');
+
+      try {
+        const warmup = await warmupNv(WARMUP_NV, WARMUP_EMPRESA);
+        if (cancelled) return;
+
+        if (warmup.alive) {
+          setServerStatus('online');
+          return;
+        }
+
+        const health = await pingServer(WARMUP_EMPRESA);
+        if (cancelled) return;
+        setServerStatus(health.ok ? 'online' : 'offline');
+      } catch {
+        if (!cancelled) setServerStatus('offline');
+      }
+    }
+
+    refreshServerStatus();
+    const timerId = window.setInterval(refreshServerStatus, STATUS_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timerId);
+    };
+  }, []);
 
   const canSearch = useMemo(() => String(numero).trim().length > 0, [numero]);
 
@@ -248,6 +299,11 @@ export default function App() {
 
           <div className="brand-text">
             <h1>{empresa === 'portones' ? 'De Grandis Portones' : 'Ipanels'}</h1>
+            <div className="brand-status">
+              <span className={`status-dot status-dot-${serverStatus}`} aria-hidden="true" />
+              <span className="status-caption">Servidor Portones</span>
+              <Badge tone={statusTone(serverStatus)}>{statusLabel(serverStatus)}</Badge>
+            </div>
           </div>
         </div>
       </header>
@@ -527,7 +583,6 @@ export default function App() {
           </div>
         </section>
       )}
-
     </div>
   );
 }

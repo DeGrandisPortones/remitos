@@ -6,16 +6,43 @@ function withEmpresa(url, empresa) {
   return `${url}${sep}empresa=${encodeURIComponent(empresa)}`;
 }
 
-async function httpJson(url) {
-  const r = await fetch(url);
+async function httpJsonDetailed(url, options) {
+  const r = await fetch(url, options);
   const text = await r.text();
   let data;
-  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-  if (!r.ok) {
-    const msg = data?.error || `HTTP ${r.status}`;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text ? { raw: text } : null;
+  }
+  return { ok: r.ok, status: r.status, data };
+}
+
+async function httpJson(url, options) {
+  const { ok, status, data } = await httpJsonDetailed(url, options);
+  if (!ok) {
+    const msg = data?.error || `HTTP ${status}`;
     throw new Error(msg);
   }
   return data;
+}
+
+export async function pingServer(empresa) {
+  const base = `${API_BASE}/api/health`;
+  const url = withEmpresa(base, empresa);
+  return httpJsonDetailed(url);
+}
+
+export async function warmupNv(nv, empresa) {
+  const base = `${API_BASE}/api/remitos/search-by-nv?nv=${encodeURIComponent(nv)}`;
+  const url = withEmpresa(base, empresa);
+  const result = await httpJsonDetailed(url);
+  const msg = String(result.data?.error || '').toLowerCase();
+
+  return {
+    ...result,
+    alive: result.ok || (result.status === 404 && msg.includes('no tiene remito')),
+  };
 }
 
 export async function searchRemitosByNumero(numero, empresa) {
@@ -40,7 +67,6 @@ export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
   return withEmpresa(base, empresa);
 }
 
-
 export async function generateCustomRemitoPdf({ empresa, header, items }) {
   const base = `${API_BASE}/api/remitos/custom/pdf`;
   const url = withEmpresa(base, empresa);
@@ -53,7 +79,11 @@ export async function generateCustomRemitoPdf({ empresa, header, items }) {
   if (!r.ok) {
     const text = await r.text();
     let data;
-    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
     const msg = data?.error || `HTTP ${r.status}`;
     throw new Error(msg);
   }
