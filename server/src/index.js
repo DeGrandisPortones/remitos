@@ -7,7 +7,7 @@ import apiRoutes from './routes.js';
 
 // Load .env and OVERRIDE any existing OS env vars.
 // This prevents surprises if Windows has e.g. SQL_SERVER=localhost set globally.
-dotenv.config({ override: true });
+dotenv.config();
 
 const app = express();
 
