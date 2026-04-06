@@ -41,11 +41,18 @@ export async function getPool(databaseOverride) {
   const dbName = databaseOverride || process.env.SQL_DATABASE;
   if (!dbName) throw new Error('Missing SQL_DATABASE (and no override provided).');
 
-  if (!pools.has(dbName)) {
+  let poolPromise = pools.get(dbName);
+
+  if (!poolPromise) {
     const pool = new sql.ConnectionPool(getSqlConfig(dbName));
-    pools.set(dbName, pool.connect());
+    poolPromise = pool.connect().catch((err) => {
+      pools.delete(dbName);
+      throw err;
+    });
+    pools.set(dbName, poolPromise);
   }
-  return pools.get(dbName);
+
+  return poolPromise;
 }
 
 export { sql };
