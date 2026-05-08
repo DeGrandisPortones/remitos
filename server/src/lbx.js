@@ -134,6 +134,96 @@ function fmtDate(v) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function wrapWords(value, maxChars = 12, maxLines = 2) {
+  const source = clean(value);
+  if (!source) return '';
+
+  const words = source.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxChars || !current) {
+      current = next;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+
+  if (current) lines.push(current);
+
+  if (lines.length <= maxLines) return lines.join('\n');
+
+  const head = lines.slice(0, maxLines - 1);
+  const tail = lines.slice(maxLines - 1).join(' ');
+  return [...head, tail].join('\n');
+}
+
+function makeTextResponsive(xml) {
+  return xml
+    .replace(/shrink="false"/g, 'shrink="true"')
+    .replace(/autoLF="false"/g, 'autoLF="true"');
+}
+
+function replaceDataInTextObject(xml, oldValue, newValue, transform = null) {
+  const oldTag = `<pt:data>${oldValue}</pt:data>`;
+  const pattern = /<text:text>[\s\S]*?<\/text:text>/g;
+  let found = false;
+
+  const out = xml.replace(pattern, (fragment) => {
+    if (found || !fragment.includes(oldTag)) return fragment;
+    found = true;
+    let next = fragment.replace(oldTag, `<pt:data>${escapeXml(newValue)}</pt:data>`);
+    if (typeof transform === 'function') next = transform(next);
+    return next;
+  });
+
+  if (!found) {
+    console.warn('No se encontro texto LBX para reemplazar:', oldValue.slice(0, 80));
+  }
+
+  return out;
+}
+
+function setTextObjectFontSize(fragment, sizePt, orgPointPt = null) {
+  let out = fragment.replace(/size="[0-9.]+pt"/g, `size="${sizePt}pt"`);
+  if (orgPointPt !== null) {
+    out = out.replace(/orgPoint="[0-9.]+pt"/g, `orgPoint="${orgPointPt}pt"`);
+  }
+  return out;
+}
+
+function extractMeasurementNumbers(value) {
+  const source = clean(value)
+    .replace(/^MED(?:IDAS)?\s*:\s*/i, '')
+    .replace(/\s*mm\s*$/i, '');
+  return source.match(/-?\d+(?:[.,]\d+)?/g) || [];
+}
+
+function normalizeDimensionTokenToMm(token) {
+  const raw = clean(token).replace(/\s*mm\s*$/i, '').replace(',', '.');
+  if (!raw) return '';
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return clean(token).replace(/\s*mm\s*$/i, '');
+  const mm = Math.abs(n) < 100 ? n * 1000 : n;
+  return String(Math.round(mm));
+}
+
+function medidasMmText(label) {
+  const source = clean(label?.medidas || label?.medidaFinal || '');
+  const nums = extractMeasurementNumbers(source);
+  if (nums.length >= 2) {
+    const ancho = normalizeDimensionTokenToMm(nums[0]);
+    const alto = normalizeDimensionTokenToMm(nums[1]);
+    if (ancho && alto) return `${ancho} X ${alto} MM`;
+  }
+
+  if (!source || source.toUpperCase() === 'NO') return 'NO';
+  return source.replace(/\s*mm\s*$/i, '').toUpperCase();
+}
+
 function replaceData(xml, oldValue, newValue) {
   const oldTag = `<pt:data>${oldValue}</pt:data>`;
   const newTag = `<pt:data>${escapeXml(newValue)}</pt:data>`;
@@ -175,18 +265,25 @@ function portonesLabelToXml(label) {
     dash(fmtDate(label.fecha || new Date())),
   ].join('\n');
 
-  const medidas = clean(label.medidas || 'NO').replace(/\s*mm\s*$/i, '');
+  const medidas = medidasMmText(label);
+  const comercializa = wrapWords(upper(label.comercializa || 'NO'), 10, 2);
 
   xml = replaceData(xml, 'N°3463/3309 ', label.orderCode || label.topCode || 'N°');
   xml = replaceData(xml, '-NEG MICRO\n-NEG MICRO\n-NO\n-NO\n-NO\n-AUT DERECHA', specs);
   xml = replaceData(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLabels);
   xml = replaceData(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', detailValues);
   xml = replaceData(xml, 'INSTALACIÓN', upper(label.tarea || 'NO'));
-  xml = replaceData(xml, 'BARENGO', upper(label.comercializa || 'NO'));
-  xml = replaceData(xml, 'MEDIDAS: 2980X2380', `MEDIDAS: ${upper(medidas)}`);
+  xml = replaceDataInTextObject(xml, 'BARENGO', comercializa, (fragment) => {
+    const lines = comercializa.split('\n').length;
+    const maxLen = Math.max(...comercializa.split('\n').map((line) => line.length));
+    const size = lines > 1 ? (maxLen > 12 ? 14 : 16) : (maxLen > 10 ? 18 : 22);
+    return setTextObjectFontSize(fragment, size, size);
+  });
+  xml = replaceData(xml, 'MEDIDAS: 2980X2380', `MEDIDAS: ${medidas}`);
 
   // Texto auxiliar superior de la plantilla original. Lo dejamos vacio para no interferir con el logo.
   xml = replaceDataRaw(xml, '267', ' ');
+  xml = makeTextResponsive(xml);
 
   return xml;
 }
@@ -234,49 +331,20 @@ function escapeXmlPreserveWhitespace(v) {
 }
 
 
-function normalizeDimensionTokenToMm(token) {
-  const raw = clean(token).replace(/\s*mm\s*$/i, '').replace(',', '.');
-  if (!raw) return '';
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return clean(token).replace(/\s*mm\s*$/i, '');
-  const mm = Math.abs(n) < 100 ? n * 1000 : n;
-  return String(Math.round(mm));
+function prepareSmallTextFragment(fragment) {
+  // La etiqueta chica puede tener hasta 4 lineas: N°, REF linea 1, REF linea 2 y medidas.
+  // Activamos ajuste de texto y reducimos la tipografia para evitar recortes.
+  return makeTextResponsive(fragment)
+    .replace(/height="39\.8pt"/g, 'height="54pt"')
+    .replace(/size="24pt"/g, 'size="16pt"')
+    .replace(/size="11\.7pt"/g, 'size="8.2pt"')
+    .replace(/orgPoint="40pt"/g, 'orgPoint="15pt"')
+    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="8.2pt"');
 }
 
 function smallMedidasText(label) {
-  const source = clean(label?.medidas || label?.medidaFinal || '');
-  if (!source || source.toUpperCase() === 'NO') return 'MED: NO';
-
-  const cleaned = source
-    .replace(/^MEDIDAS\s*:\s*/i, '')
-    .replace(/\s*mm\s*$/i, '')
-    .trim();
-
-  const parts = cleaned.split(/\s*x\s*/i);
-  if (parts.length >= 2) {
-    const ancho = normalizeDimensionTokenToMm(parts[0]);
-    const alto = normalizeDimensionTokenToMm(parts[1]);
-    if (ancho && alto) return `MED: ${ancho}X${alto} MM`;
-  }
-
-  return `MED: ${cleaned.toUpperCase()} MM`;
-}
-
-function compactSmallRef(value, max = 28) {
-  const s = clean(value);
-  if (s.length <= max) return s;
-  return `${s.slice(0, Math.max(0, max - 1)).trim()}…`;
-}
-
-function prepareSmallTextFragment(fragment) {
-  // La etiqueta chica ahora tiene 3 lineas (N°, REF y medidas). Reducimos un poco
-  // la tipografia para que no se pisen las lineas en la cinta Brother.
-  return fragment
-    .replace(/height="39\.8pt"/g, 'height="46pt"')
-    .replace(/size="24pt"/g, 'size="18pt"')
-    .replace(/size="11\.7pt"/g, 'size="9pt"')
-    .replace(/orgPoint="40pt"/g, 'orgPoint="18pt"')
-    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="9pt"');
+  const medidas = medidasMmText(label);
+  return medidas === 'NO' ? 'MED: NO' : `MED: ${medidas}`;
 }
 
 function smallRefText(label) {
@@ -284,7 +352,10 @@ function smallRefText(label) {
   const nvMatch = nvRaw.match(/\d+/);
   const nv = nvMatch ? nvMatch[0] : nvRaw;
   const ref = [clean(label?.cliente), clean(label?.comercializa)].filter(Boolean).join(' / ') || 'NO';
-  return `N°${nv}\nREF: ${compactSmallRef(ref)}\n${smallMedidasText(label)}`;
+  const refLines = wrapWords(upper(ref), 13, 2).split('\n');
+  const firstRef = refLines.shift() || 'NO';
+  const refText = [`REF: ${firstRef}`, ...refLines].join('\n');
+  return `N°${nv}\n${refText}\n${smallMedidasText(label)}`;
 }
 
 function buildSmallPortonesLabelXml(label, copies = 4) {
