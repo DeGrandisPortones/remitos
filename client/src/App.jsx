@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   fetchLabelDataForNv,
   generateCustomRemitoPdf,
+  generateLabelLbxFromLabels,
   generateLabelPdfFromLabels,
+  generateSmallLabelPdfFromLabels,
   pdfUrlForRemito,
   pingServer,
   searchRemitosByNumero,
@@ -96,6 +98,17 @@ function statusTone(serverStatus) {
 
 function labelFieldsFor(label) {
   return label?.brand === 'ipanel' ? IPANEL_LABEL_FIELDS : PORTONES_LABEL_FIELDS;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export default function App() {
@@ -294,6 +307,50 @@ export default function App() {
       closeLabelModal();
     } catch (err) {
       setError(err?.message || 'Error al generar etiqueta');
+    } finally {
+      setLabelLoading(false);
+    }
+  }
+
+
+  async function downloadEditedLabelLbx() {
+    if (!labelModalLabels.length) return;
+
+    try {
+      setLabelLoading(true);
+      setError('');
+      const blob = await generateLabelLbxFromLabels({
+        labels: labelModalLabels,
+        nv: labelModalNv,
+        empresa,
+      });
+      downloadBlob(blob, `etiqueta-portones-${labelModalNv || 'nv'}.lbx`);
+      closeLabelModal();
+    } catch (err) {
+      setError(err?.message || 'Error al generar archivo LBX');
+    } finally {
+      setLabelLoading(false);
+    }
+  }
+
+
+  async function generateSmallEditedLabels() {
+    if (!labelModalLabels.length) return;
+
+    try {
+      setLabelLoading(true);
+      setError('');
+      const blob = await generateSmallLabelPdfFromLabels({
+        labels: labelModalLabels,
+        nv: labelModalNv,
+        empresa,
+        copies: 4,
+      });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(err?.message || 'Error al generar etiqueta chica');
     } finally {
       setLabelLoading(false);
     }
@@ -675,7 +732,7 @@ export default function App() {
             <div className="modal-header">
               <div>
                 <div className="modal-title">Editar etiqueta NV {labelModalNv}</div>
-                <div className="modal-subtitle">Revisa y ajusta los datos antes de generar el PDF.</div>
+                <div className="modal-subtitle">Revisa y ajusta los datos antes de generar la etiqueta.</div>
               </div>
               <button className="modal-close" type="button" onClick={closeLabelModal} disabled={labelLoading}>x</button>
             </div>
@@ -705,8 +762,18 @@ export default function App() {
               <button className="btn btn-secondary" type="button" onClick={closeLabelModal} disabled={labelLoading}>
                 Cancelar
               </button>
+              {empresa === 'portones' ? (
+                <button className="btn btn-secondary" type="button" onClick={downloadEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
+                  {labelLoading ? 'Generando...' : 'Descargar LBX Brother'}
+                </button>
+              ) : null}
+              {empresa === 'portones' ? (
+                <button className="btn btn-secondary" type="button" onClick={generateSmallEditedLabels} disabled={labelLoading || labelModalLabels.length === 0}>
+                  {labelLoading ? 'Generando...' : 'PDF chico x4'}
+                </button>
+              ) : null}
               <button className="btn" type="button" onClick={generateEditedLabels} disabled={labelLoading || labelModalLabels.length === 0}>
-                {labelLoading ? 'Generando...' : 'Generar etiqueta'}
+                {labelLoading ? 'Generando...' : 'Generar PDF grande'}
               </button>
             </div>
           </div>

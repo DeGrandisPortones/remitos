@@ -7,6 +7,8 @@ const PAGE_W = 175.7;
 // La plantilla Brother tiene corte libre en 475.5pt. La etiqueta real que se imprime
 // es ese primer tramo; el diseño anterior usaba todo el alto del .lbx y quedaba demasiado largo.
 const PAGE_H = 475.5;
+const SMALL_PAGE_W = 175.7; // 62 mm
+const SMALL_PAGE_H = 60; // aprox 21 mm
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,8 +32,12 @@ function dash(v) {
 
 function fmtDate(v) {
   if (!v) return '';
+  const raw = clean(v);
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+
   const d = v instanceof Date ? v : new Date(v);
-  if (Number.isNaN(d.getTime())) return clean(v);
+  if (Number.isNaN(d.getTime())) return raw;
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const yyyy = d.getFullYear();
@@ -240,6 +246,63 @@ function drawIpanelLabelPage(doc, label) {
     size: 10.5,
     bold: true,
     align: 'center',
+  });
+}
+
+
+function drawSmallPortonesLabelPage(doc, label) {
+  const nvRaw = clean(label.nv || label.topCode || label.orderCode || '');
+  const nv = nvRaw.replace(/^N\s*[°º]?\s*/i, '').replace(/^NV\s*/i, '').trim() || nvRaw;
+  const refParts = [label.cliente, label.comercializa]
+    .map((v) => clean(v))
+    .filter(Boolean);
+  const ref = refParts.length ? refParts.join(' / ') : clean(label.referencia || 'NO');
+
+  doc.save();
+  doc.rect(2, 2, SMALL_PAGE_W - 4, SMALL_PAGE_H - 4).strokeColor('black').lineWidth(0.5).stroke();
+  doc.restore();
+
+  if (fs.existsSync(DEGRANDIS_LOGO_PATH)) {
+    try {
+      doc.image(DEGRANDIS_LOGO_PATH, 6, 8, { fit: [44, 24], align: 'center', valign: 'center' });
+    } catch (_) {
+      text(doc, 'DG', 7, 9, 28, 12, { size: 10, bold: true, align: 'center' });
+      text(doc, 'PORTONES', 4, 24, 38, 8, { size: 5.5, bold: true, align: 'center' });
+    }
+  } else {
+    text(doc, 'DG', 7, 9, 28, 12, { size: 10, bold: true, align: 'center' });
+    text(doc, 'PORTONES', 4, 24, 38, 8, { size: 5.5, bold: true, align: 'center' });
+  }
+
+  text(doc, `N°${nv}`, 54, 6, 118, 24, {
+    size: fitFontSize(`N°${nv}`, 22, 118, 9),
+    bold: false,
+    align: 'center',
+  });
+
+  const refText = `REF: ${upper(ref)}`;
+  text(doc, refText, 54, 34, 116, 16, {
+    size: fitFontSize(refText, 11, 116, 17),
+    bold: false,
+    align: 'center',
+  });
+}
+
+export async function buildSmallPortonLabelsPdf(label, copies = 4) {
+  const doc = new PDFDocument({ size: [SMALL_PAGE_W, SMALL_PAGE_H], margin: 0, autoFirstPage: false });
+  const chunks = [];
+  doc.on('data', (d) => chunks.push(d));
+
+  const safeCopies = Math.max(1, Math.min(20, Number(copies) || 4));
+  for (let i = 0; i < safeCopies; i += 1) {
+    doc.addPage({ size: [SMALL_PAGE_W, SMALL_PAGE_H], margin: 0 });
+    drawSmallPortonesLabelPage(doc, label || {});
+  }
+
+  return await new Promise((resolve, reject) => {
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.end();
   });
 }
 

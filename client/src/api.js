@@ -108,6 +108,27 @@ export async function generateLabelPdfFromLabels({ labels, nv, empresa }) {
   });
 }
 
+
+export async function generateSmallLabelPdfFromLabels({ labels, nv, empresa, copies = 4 }) {
+  const base = `${API_BASE}/api/etiquetas/small/pdf`;
+  const url = withEmpresa(base, empresa);
+  return httpBlob(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels, nv, empresa, copies }),
+  });
+}
+
+export async function generateLabelLbxFromLabels({ labels, nv, empresa }) {
+  const base = `${API_BASE}/api/etiquetas/lbx`;
+  const url = withEmpresa(base, empresa);
+  return httpBlob(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels, nv, empresa }),
+  });
+}
+
 export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
   const base = `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}`;
   return withEmpresa(base, empresa);
