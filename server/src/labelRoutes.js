@@ -191,7 +191,7 @@ async function fetchRemitosByFactura(pool, factura) {
     {
       name: 'REMITOS por facnro',
       sql: `
-        SELECT TOP (20) r.tipo, r.sucursal, r.numero, r.pendiente, r.anulado
+        SELECT TOP (20) r.*
         FROM dbo.REMITOS r
         INNER JOIN (
           SELECT DISTINCT tipo, sucursal, numero
@@ -202,6 +202,76 @@ async function fetchRemitosByFactura(pool, factura) {
       `,
     },
   ], { factura: { type: sql.Int, value: Math.trunc(f) } });
+}
+
+async function fetchPortonesItemsForRemito(pool, remito) {
+  const tipo = clean(remito?.tipo);
+  const sucursal = parseIntSafe(remito?.sucursal);
+  const numero = parseIntSafe(remito?.numero);
+  if (!tipo || sucursal === null || numero === null) return [];
+
+  const inputs = {
+    tipo: { type: sql.VarChar(10), value: tipo },
+    sucursal: { type: sql.Int, value: sucursal },
+    numero: { type: sql.Int, value: numero },
+  };
+
+  return tryQuery(pool, [
+    {
+      name: 'Portones IREMITOS + PRODUCTOS',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha,
+          p.descripcion AS descripcion
+        FROM dbo.IREMITOS i
+        LEFT JOIN dbo.PRODUCTOS p ON p.codigo = i.producto
+        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+    {
+      name: 'Portones IREMITOS + ARTICULOS descripcion',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha,
+          a.descripcion AS descripcion
+        FROM dbo.IREMITOS i
+        LEFT JOIN dbo.ARTICULOS a ON a.codigo = i.producto
+        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+    {
+      name: 'Portones IREMITOS + ARTICULOS detalle',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha,
+          a.detalle AS descripcion
+        FROM dbo.IREMITOS i
+        LEFT JOIN dbo.ARTICULOS a ON a.codart = i.producto
+        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+    {
+      name: 'Portones IREMITOS base',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha
+        FROM dbo.IREMITOS i
+        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+  ], inputs);
 }
 
 async function fetchPanelesRemitoByNv(pool, nv) {
@@ -394,6 +464,62 @@ function toPortonLabel(row, venta, remitos, nv, index) {
   };
 }
 
+
+function toPortonFallbackLabel(row, venta, remito, remitos, nv, index) {
+  const producto = pick(row, ['producto', 'Producto', 'codigo', 'Código', 'codart']);
+  const descripcion = pick(row, ['descripcion', 'Descripción', 'detalle', 'Detalle', 'articulo', 'Artículo']);
+  const cantidad = pick(row, ['cantidad', 'Cantidad', 'cant', 'Cant']);
+  const unidad = pick(row, ['uventa', 'Unidad', 'unidad', 'umedida']);
+  const medidas = firstNonEmpty(formatMedidas(row), descripcion);
+  const remitoNumero = firstNonEmpty(remito?.numero, row?.numero);
+
+  return {
+    brand: 'portones',
+    topCode: clean(index),
+    orderCode: `NV ${nv}`,
+    colorPiernas: '',
+    revestimiento: firstNonEmpty(descripcion, producto),
+    liston: producto,
+    puerta: '',
+    lucera: '',
+    accionamiento: '',
+    tarea: 'REMITO',
+    direccion: firstNonEmpty(pick(remito, ['dirent', 'direccion', 'Dirección']), pick(venta, ['dirent', 'direccion', 'Dirección'])),
+    localidad: firstNonEmpty(pick(remito, ['localidad']), pick(venta, ['localidad'])),
+    cliente: firstNonEmpty(pick(remito, ['nombre']), pick(venta, ['nombre'])),
+    referencia: firstNonEmpty(descripcion, producto),
+    fecha: firstNonEmpty(pick(remito, ['fecha', 'cfecha']), pick(venta, ['fecha', 'cfecha'])),
+    comercializa: firstNonEmpty(pick(remito, ['vendedor']), pick(venta, ['vendedor'])),
+    medidas,
+    numeroInterno: remitoNumero,
+    remitosPendientes: remitosLabel(remitos),
+    material: firstNonEmpty(descripcion, producto),
+    nv,
+    medidaFinal: clean(cantidad) ? `CANTIDAD: ${clean(cantidad)} ${clean(unidad)}` : medidas,
+    calculadora: firstNonEmpty(pick(remito, ['operador']), pick(venta, ['operador'])),
+    vendedor: firstNonEmpty(pick(remito, ['vendedor']), pick(venta, ['vendedor'])),
+    carpinteria: 'DE GRANDIS',
+  };
+}
+
+async function buildPortonesFallbackLabels(pool, { nv, venta, remitos }) {
+  const usableRemitos = (Array.isArray(remitos) ? remitos : []).filter((r) => !r?.anulado);
+  if (!usableRemitos.length) {
+    return { error: 'La NV ingresada no tiene remito aún.' };
+  }
+
+  const labels = [];
+  for (const remito of usableRemitos) {
+    const items = await fetchPortonesItemsForRemito(pool, remito);
+    const rows = items.length ? items : [{}];
+    for (const row of rows) {
+      labels.push(toPortonFallbackLabel(row, venta, remito, usableRemitos, nv, labels.length + 1));
+    }
+  }
+
+  return { labels };
+}
+
 function toIpanelLabel(row, venta, header, remito, nv, index) {
   const producto = pick(row, ['producto', 'Producto', 'codigo', 'Código', 'codart']);
   const descripcion = pick(row, ['descripcion', 'Descripción', 'detalle', 'Detalle', 'articulo', 'Artículo']);
@@ -432,13 +558,18 @@ function toIpanelLabel(row, venta, header, remito, nv, index) {
 }
 
 async function buildPortonesLabels(pool, nv) {
-  const portones = await fetchPortonesByNv(pool, nv);
-  if (!portones.length) return { error: 'No se encontró información de portón para esa NV.' };
-
   const venta = await fetchVentaByNv(pool, nv);
   const factura = await fetchFacturaByNv(pool, nv);
   const remitos = await fetchRemitosByFactura(pool, factura);
-  return { labels: portones.map((row, idx) => toPortonLabel(row, venta, remitos, nv, idx + 1)) };
+  const portones = await fetchPortonesByNv(pool, nv);
+
+  if (portones.length) {
+    return { labels: portones.map((row, idx) => toPortonLabel(row, venta, remitos, nv, idx + 1)) };
+  }
+
+  // Algunas NV antiguas tienen remito/factura, pero no tienen registro en Pre_Produccion.
+  // En ese caso igualmente generamos la etiqueta con datos del remito y sus ítems.
+  return buildPortonesFallbackLabels(pool, { nv, venta, remitos });
 }
 
 async function buildIpanelLabels(pool, nv) {

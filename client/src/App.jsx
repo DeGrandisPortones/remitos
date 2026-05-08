@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   generateCustomRemitoPdf,
-  labelPdfUrlForNv,
+  generateLabelPdfForNv,
   pdfUrlForRemito,
   pingServer,
   searchRemitosByNumero,
@@ -174,7 +174,7 @@ export default function App() {
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
-  function openLabelsForNv() {
+  async function openLabelsForNv() {
     triggerLogoShake();
     setError('');
 
@@ -184,8 +184,22 @@ export default function App() {
       return;
     }
 
-    const url = labelPdfUrlForNv({ nv: Math.trunc(n), empresa });
-    window.open(url, '_blank', 'noopener,noreferrer');
+    try {
+      setLoading(true);
+      const blob = await generateLabelPdfForNv({ nv: Math.trunc(n), empresa });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      const msg = err?.message || 'Error al generar etiqueta';
+      if (String(msg).toLowerCase().includes('no tiene remito')) {
+        window.alert('La NV ingresada no tiene remito aún.');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   function pickEmpresa(next) {

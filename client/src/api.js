@@ -67,6 +67,25 @@ export function labelPdfUrlForNv({ nv, empresa }) {
   return withEmpresa(base, empresa);
 }
 
+export async function generateLabelPdfForNv({ nv, empresa }) {
+  const url = labelPdfUrlForNv({ nv, empresa });
+  const r = await fetch(url);
+
+  if (!r.ok) {
+    const text = await r.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+    const msg = data?.error || `HTTP ${r.status}`;
+    throw new Error(msg);
+  }
+
+  return r.blob();
+}
+
 export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
   const base = `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}`;
   return withEmpresa(base, empresa);

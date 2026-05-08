@@ -59,3 +59,14 @@ El usuario elige empresa desde los logos existentes, ingresa la NV y abre el PDF
 ## Nota
 
 El archivo `.lbx` enviado se usó como referencia de medidas y distribución. Este parche genera PDF imprimible para Brother QL-800, no un `.lbx` editable de P-touch Editor.
+
+## Fallback para NV antiguas
+
+Si una NV de Portones no tiene fila en `Pre_Produccion`, pero sí tiene factura/remito, el endpoint ya no devuelve error. En ese caso genera las etiquetas usando:
+
+- `NTASVTAS.factura`
+- `IREMITOS.facnro`
+- `REMITOS`
+- ítems de `IREMITOS` con descripción desde `PRODUCTOS` / `ARTICULOS` cuando exista
+
+Esto cubre casos como NV viejas donde `Buscar` encuentra el remito, pero no existe información completa de portón en `Pre_Produccion`.
