@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
-import { buildPortonLabelsPdf, buildSmallPortonLabelsPdf } from './labelPdf.js';
 import { buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
 
 const router = Router();
@@ -582,26 +581,6 @@ async function handleLabelsDataByNv(req, res, forcedEmpresa) {
   }
 }
 
-async function handleLabelsByNv(req, res, forcedEmpresa) {
-  try {
-    const result = await buildLabelsForRequest(req, forcedEmpresa);
-    if (result.error) return res.status(result.status).json({ error: result.error });
-
-    const pdfBuffer = await buildPortonLabelsPdf(result.labels);
-    const filename = result.empresa === 'ipanel'
-      ? `etiquetas-ipanel-nv-${result.nv}.pdf`
-      : `etiquetas-portones-nv-${result.nv}.pdf`;
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-    return res.send(pdfBuffer);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Label generation error', detail: String(err.message || err) });
-  }
-}
-
-
 async function handleSmallEditedLabelLbx(req, res) {
   try {
     const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
@@ -629,63 +608,10 @@ async function handleSmallEditedLabelLbx(req, res) {
   }
 }
 
-async function handleSmallEditedLabelPdf(req, res) {
-  try {
-    const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
-    if (!labelsIn.length) {
-      return res.status(400).json({ error: 'Body must include labels array.' });
-    }
-
-    const first = normalizeClientLabel(labelsIn[0]);
-    if (first.brand === 'ipanel') {
-      return res.status(400).json({ error: 'La etiqueta chica solo esta disponible para Portones.' });
-    }
-
-    const copiesRaw = Number(req.body?.copies ?? 4);
-    const copies = Number.isFinite(copiesRaw) ? Math.max(1, Math.min(20, Math.trunc(copiesRaw))) : 4;
-    const firstNv = clean(req.body?.nv || first?.nv || first?.topCode || first?.orderCode || 'editada').replace(/[^a-zA-Z0-9_-]/g, '');
-    const pdfBuffer = await buildSmallPortonLabelsPdf(first, copies);
-    const filename = `etiquetas-chicas-portones-${firstNv || 'nv'}-x${copies}.pdf`;
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-    return res.send(pdfBuffer);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Small label generation error', detail: String(err.message || err) });
-  }
-}
-
-async function handleEditedLabelsPdf(req, res) {
-  try {
-    const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
-    if (!labelsIn.length) {
-      return res.status(400).json({ error: 'Body must include labels array.' });
-    }
-
-    const labels = labelsIn.map(normalizeClientLabel);
-    const firstNv = clean(req.body?.nv || labels[0]?.nv || labels[0]?.topCode || 'editadas').replace(/[^a-zA-Z0-9_-]/g, '');
-    const pdfBuffer = await buildPortonLabelsPdf(labels);
-    const filename = `etiquetas-editadas-${firstNv || 'nv'}.pdf`;
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-    return res.send(pdfBuffer);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Edited label generation error', detail: String(err.message || err) });
-  }
-}
-
 router.get('/etiquetas/by-nv/data', (req, res) => handleLabelsDataByNv(req, res));
 router.get('/etiquetas/portones/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'portones'));
 router.get('/etiquetas/ipanel/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'ipanel'));
-router.post('/etiquetas/small/pdf', handleSmallEditedLabelPdf);
 router.post('/etiquetas/small/lbx', handleSmallEditedLabelLbx);
-router.post('/etiquetas/pdf', handleEditedLabelsPdf);
 router.post('/etiquetas/lbx', handleEditedLabelsLbx);
-router.get('/etiquetas/by-nv', (req, res) => handleLabelsByNv(req, res));
-router.get('/etiquetas/portones/by-nv', (req, res) => handleLabelsByNv(req, res, 'portones'));
-router.get('/etiquetas/ipanel/by-nv', (req, res) => handleLabelsByNv(req, res, 'ipanel'));
 
 export default router;

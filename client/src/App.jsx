@@ -3,9 +3,7 @@ import {
   fetchLabelDataForNv,
   generateCustomRemitoPdf,
   generateLabelLbxFromLabels,
-  generateLabelPdfFromLabels,
   generateSmallLabelLbxFromLabels,
-  generateSmallLabelPdfFromLabels,
   pdfUrlForRemito,
   pingServer,
   searchRemitosByNumero,
@@ -291,29 +289,6 @@ export default function App() {
     setLabelModalNv('');
   }
 
-  async function generateEditedLabels() {
-    if (!labelModalLabels.length) return;
-
-    try {
-      setLabelLoading(true);
-      setError('');
-      const blob = await generateLabelPdfFromLabels({
-        labels: labelModalLabels,
-        nv: labelModalNv,
-        empresa,
-      });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      closeLabelModal();
-    } catch (err) {
-      setError(err?.message || 'Error al generar etiqueta');
-    } finally {
-      setLabelLoading(false);
-    }
-  }
-
-
   async function downloadEditedLabelLbx() {
     if (!labelModalLabels.length) return;
 
@@ -350,28 +325,6 @@ export default function App() {
       downloadBlob(blob, `etiquetas-chicas-portones-${labelModalNv || 'nv'}-x4.lbx`);
     } catch (err) {
       setError(err?.message || 'Error al generar etiqueta chica LBX');
-    } finally {
-      setLabelLoading(false);
-    }
-  }
-
-  async function generateSmallEditedLabels() {
-    if (!labelModalLabels.length) return;
-
-    try {
-      setLabelLoading(true);
-      setError('');
-      const blob = await generateSmallLabelPdfFromLabels({
-        labels: labelModalLabels,
-        nv: labelModalNv,
-        empresa,
-        copies: 4,
-      });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (err) {
-      setError(err?.message || 'Error al generar etiqueta chica');
     } finally {
       setLabelLoading(false);
     }
@@ -785,7 +738,7 @@ export default function App() {
               </button>
               {empresa === 'portones' ? (
                 <button className="btn btn-secondary" type="button" onClick={downloadEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
-                  {labelLoading ? 'Generando...' : 'Descargar LBX Brother'}
+                  {labelLoading ? 'Generando...' : 'LBX grande'}
                 </button>
               ) : null}
               {empresa === 'portones' ? (
@@ -793,9 +746,6 @@ export default function App() {
                   {labelLoading ? 'Generando...' : 'LBX chico x4'}
                 </button>
               ) : null}
-              <button className="btn" type="button" onClick={generateEditedLabels} disabled={labelLoading || labelModalLabels.length === 0}>
-                {labelLoading ? 'Generando...' : 'Generar PDF grande'}
-              </button>
             </div>
           </div>
         </div>

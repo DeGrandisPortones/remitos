@@ -78,10 +78,6 @@ export function pdfUrlForRemito({ tipo, sucursal, numero, empresa }) {
   return withEmpresa(base, empresa);
 }
 
-export function labelPdfUrlForNv({ nv, empresa }) {
-  const base = `${API_BASE}/api/etiquetas/by-nv?nv=${encodeURIComponent(nv)}`;
-  return withEmpresa(base, empresa);
-}
 
 export function labelDataUrlForNv({ nv, empresa }) {
   const base = `${API_BASE}/api/etiquetas/by-nv/data?nv=${encodeURIComponent(nv)}`;
@@ -93,31 +89,7 @@ export async function fetchLabelDataForNv({ nv, empresa }) {
   return httpJson(url);
 }
 
-export async function generateLabelPdfForNv({ nv, empresa }) {
-  const url = labelPdfUrlForNv({ nv, empresa });
-  return httpBlob(url);
-}
 
-export async function generateLabelPdfFromLabels({ labels, nv, empresa }) {
-  const base = `${API_BASE}/api/etiquetas/pdf`;
-  const url = withEmpresa(base, empresa);
-  return httpBlob(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ labels, nv, empresa }),
-  });
-}
-
-
-export async function generateSmallLabelPdfFromLabels({ labels, nv, empresa, copies = 4 }) {
-  const base = `${API_BASE}/api/etiquetas/small/pdf`;
-  const url = withEmpresa(base, empresa);
-  return httpBlob(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ labels, nv, empresa, copies }),
-  });
-}
 
 
 export async function generateSmallLabelLbxFromLabels({ labels, nv, empresa, copies = 4 }) {
