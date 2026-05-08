@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRoutes from './routes.js';
+import labelRoutes from './labelRoutes.js';
 
 // Load .env and OVERRIDE any existing OS env vars.
 // This prevents surprises if Windows has e.g. SQL_SERVER=localhost set globally.
@@ -23,6 +24,7 @@ app.use(cors({
 }));
 
 app.use('/api', apiRoutes);
+app.use('/api', labelRoutes);
 
 // Optional: serve built client
 const __filename = fileURLToPath(import.meta.url);

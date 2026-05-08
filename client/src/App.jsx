@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   generateCustomRemitoPdf,
+  labelPdfUrlForNv,
   pdfUrlForRemito,
   pingServer,
   searchRemitosByNumero,
@@ -170,6 +171,20 @@ export default function App() {
       const sep = url.includes('?') ? '&' : '?';
       url = `${url}${sep}nv=${encodeURIComponent(String(numero).trim())}`;
     }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function openLabelsForNv() {
+    triggerLogoShake();
+    setError('');
+
+    const n = Number(numero);
+    if (!Number.isFinite(n)) {
+      setError('Ingresá un número de NV válido.');
+      return;
+    }
+
+    const url = labelPdfUrlForNv({ nv: Math.trunc(n), empresa });
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
@@ -358,6 +373,11 @@ export default function App() {
               <button className="btn" disabled={!canSearch || loading} type="submit">
                 {loading ? 'Buscando…' : 'Buscar'}
               </button>
+              {mode === 'nv' ? (
+                <button className="btn btn-secondary" disabled={!canSearch || loading} type="button" onClick={openLabelsForNv}>
+                  Etiqueta
+                </button>
+              ) : null}
               <button
                 className="btn btn-secondary"
                 type="button"

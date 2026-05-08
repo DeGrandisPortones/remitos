@@ -62,6 +62,11 @@ export function pdfUrlForRemito({ tipo, sucursal, numero, empresa }) {
   return withEmpresa(base, empresa);
 }
 
+export function labelPdfUrlForNv({ nv, empresa }) {
+  const base = `${API_BASE}/api/etiquetas/portones/by-nv?nv=${encodeURIComponent(nv)}`;
+  return withEmpresa(base, empresa);
+}
+
 export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
   const base = `${API_BASE}/api/remitos/${encodeURIComponent(tipo)}/${encodeURIComponent(sucursal)}/${encodeURIComponent(numero)}`;
   return withEmpresa(base, empresa);
