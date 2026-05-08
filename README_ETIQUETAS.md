@@ -56,3 +56,23 @@ Copiar estos archivos sobre el proyecto:
 - `client/src/api.js`
 
 Después redeployar backend y frontend.
+
+
+## Mapeo Portones actualizado
+
+La etiqueta de Portones toma los datos desde `WebApp.dbo.Pre_Produccion` por columna `NV`.
+
+- Número principal: `N° <NV>`
+- COLOR PIERNAS: `Color_Sistema`
+- REVESTIMIENTO: `Color_Hoja`
+- LISTON: `Liston`
+- LUCERA: `Lucera`
+- ACCIONAMIENTO: `MOTOR_Condicion` abreviado (`AUTOMATICO` -> `AUT`, `MANUAL` -> `MAN`) + `MOTOR_Posicion`
+- Bloque central: `Tipo_Embalaje`
+- DIRECCION y segunda línea: `Direccion`
+- CLIENTE: `Nombre`
+- FECHA: fecha de generación del archivo
+- COMERCIALIZA: `RazSoc`
+- MEDIDAS: `Ancho X Alto`
+
+Si una propiedad requerida viene `NULL`, vacía o como texto `NULL`, se imprime `NO`.

@@ -50,6 +50,14 @@ function joinParts(parts, sep = ' ') {
   return parts.map(clean).filter(Boolean).join(sep);
 }
 
+function formatDimension(v) {
+  const s = clean(v);
+  if (!s) return '';
+  const n = Number(String(s).replace(',', '.'));
+  if (!Number.isFinite(n)) return s;
+  return String(Number(n.toFixed(3))).replace('.', ',');
+}
+
 function formatMedidas(row) {
   const explicit = pick(row, [
     'MEDIDAS', 'Medidas', 'medidas', 'Medida', 'medida',
@@ -59,8 +67,8 @@ function formatMedidas(row) {
 
   const ancho = pick(row, ['Ancho', 'ANCHO', 'ancho', 'ANCHO_MM', 'ancho_mm']);
   const alto = pick(row, ['Alto', 'ALTO', 'alto', 'ALTO_MM', 'alto_mm']);
-  const a = clean(ancho);
-  const h = clean(alto);
+  const a = formatDimension(ancho);
+  const h = formatDimension(alto);
   if (a && h) return `${a} x ${h}`;
   return a || h || '';
 }
@@ -334,47 +342,91 @@ function panelRemitoLabel(header, remito) {
   return `REMITO ${clean(suc)}-${clean(nro)}`;
 }
 
+function prop(row, names) {
+  const value = pick(row, names);
+  const s = clean(value);
+  if (!s || s.toLowerCase() === 'null') return 'NO';
+  return s;
+}
+
+function shortMotorCondicion(value) {
+  const s = prop({ value }, ['value']);
+  const normalized = s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+
+  if (normalized === 'AUTOMATICO') return 'AUT';
+  if (normalized === 'MANUAL') return 'MAN';
+  return s;
+}
+
+function splitAddress(value) {
+  const s = prop({ value }, ['value']);
+  if (s === 'NO') return { line1: 'NO', line2: 'NO' };
+
+  const maxLen = 22;
+  if (s.length <= maxLen) return { line1: s, line2: 'NO' };
+
+  const words = s.split(' ');
+  let line1 = '';
+  const rest = [];
+
+  for (const word of words) {
+    const next = line1 ? `${line1} ${word}` : word;
+    if (next.length <= maxLen || !line1) {
+      line1 = next;
+    } else {
+      rest.push(word);
+    }
+  }
+
+  const line2 = rest.join(' ').trim();
+  return { line1: line1 || s.slice(0, maxLen), line2: line2 || 'NO' };
+}
+
 function toPortonPreProduccionLabel(row, nv, index) {
-  const medidas = formatMedidas(row);
-  const partida = pick(row, ['PARTIDA', 'Partida', 'partida']);
-  const id = pick(row, ['ID', 'Id', 'id']);
-  const nombre = pick(row, ['Nombre', 'NOMBRE', 'nombre']);
-  const razSoc = pick(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social']);
-  const colorHoja = pick(row, ['Color_Hoja', 'COLOR_HOJA', 'Color Hoja']);
-  const sistema = pick(row, ['Sistema', 'SISTEMA', 'sistema']);
-  const motor = joinParts([
-    pick(row, ['MOTOR_Condicion', 'Motor Condicion']),
-    pick(row, ['MOTOR_Posicion', 'Motor Posicion']),
-  ], ' - ');
+  const ancho = prop(row, ['Ancho', 'ANCHO', 'ancho']);
+  const alto = prop(row, ['Alto', 'ALTO', 'alto']);
+  const medidas = `${formatDimension(ancho) || 'NO'} X ${formatDimension(alto) || 'NO'}`;
+  const direccion = prop(row, ['Direccion', 'Dirección', 'DIRECCION']);
+  const direccionParts = splitAddress(direccion);
+  const motorCondicion = shortMotorCondicion(pick(row, ['MOTOR_Condicion', 'Motor Condicion', 'MOTOR CONDICION']));
+  const motorPosicion = prop(row, ['MOTOR_Posicion', 'Motor Posicion', 'MOTOR POSICION']);
+  const accionamiento = `${motorCondicion} ${motorPosicion}`.trim();
 
   return {
     brand: 'portones',
-    topCode: clean(partida) ? `P ${partida}` : `#${index}`,
-    orderCode: clean(partida) ? `N°${partida}` : `NV ${nv}`,
-    colorPiernas: firstNonEmpty(pick(row, ['Color_Sistema', 'Color Sistema']), pick(row, ['Color'])),
-    revestimiento: pick(row, ['Revestimiento']),
-    liston: pick(row, ['Liston', 'Listón']),
-    puerta: pick(row, ['PUERTA_Posicion', 'Puerta Posicion']),
-    lucera: pick(row, ['Lucera']),
-    accionamiento: motor,
-    tarea: firstNonEmpty(nombre, sistema, 'PORTÓN A MEDIDA'),
-    direccion: pick(row, ['Direccion', 'Dirección']),
-    localidad: '',
-    cliente: firstNonEmpty(razSoc, nombre),
-    referencia: firstNonEmpty(nombre, sistema),
+    topCode: `NV ${nv}`,
+    // En la plantilla, este campo se muestra como "N° XXXX" y corresponde a la NV.
+    orderCode: `N° ${nv}`,
+    colorPiernas: prop(row, ['Color_Sistema', 'Color Sistema', 'COLOR_SISTEMA']),
+    revestimiento: prop(row, ['Color_Hoja', 'Color Hoja', 'COLOR_HOJA']),
+    liston: prop(row, ['Liston', 'Listón', 'LISTON']),
+    puerta: prop(row, ['PUERTA_Posicion', 'Puerta Posicion', 'PUERTA POSICION']),
+    lucera: prop(row, ['Lucera', 'LUCERA']),
+    accionamiento: accionamiento || 'NO',
+    // El bloque grande que antes decía INSTALACIÓN ahora muestra el Tipo_Embalaje.
+    tarea: prop(row, ['Tipo_Embalaje', 'Tipo Embalaje', 'TIPO_EMBALAJE']),
+    direccion: direccionParts.line1,
+    direccion2: direccionParts.line2,
+    cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
+    referencia: '',
+    // El usuario pidió fecha de impresión, no Fecha_NV.
     fecha: new Date(),
-    comercializa: 'DE GRANDIS PORTONES',
+    comercializa: prop(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social']),
     medidas,
-    numeroInterno: firstNonEmpty(id, partida),
-    remitosPendientes: clean(partida) ? `PARTIDA\n${partida}` : `NV\n${nv}`,
-    material: firstNonEmpty(colorHoja, pick(row, ['Color'])),
+    numeroInterno: firstNonEmpty(nv, index),
+    remitosPendientes: '',
+    material: prop(row, ['Color_Hoja', 'Color Hoja', 'COLOR_HOJA']),
     nv,
     medidaFinal: medidas,
-    calculadora: sistema,
-    vendedor: firstNonEmpty(pick(row, ['Estado']), ''),
-    carpinteria: firstNonEmpty(colorHoja ? `COLOR HOJA\n${colorHoja}` : '', 'DE GRANDIS'),
+    calculadora: '',
+    vendedor: '',
+    carpinteria: '',
   };
 }
+
 
 function toIpanelLabel(row, venta, header, remito, nv, index) {
   const producto = pick(row, ['producto', 'Producto', 'codigo', 'Código', 'codart']);

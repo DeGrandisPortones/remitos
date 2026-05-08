@@ -4,11 +4,15 @@ import { fileURLToPath } from 'url';
 import PDFDocument from 'pdfkit';
 
 const PAGE_W = 175.7;
-const PAGE_H = 830.2;
+// La plantilla Brother tiene corte libre en 475.5pt. La etiqueta real que se imprime
+// es ese primer tramo; el diseño anterior usaba todo el alto del .lbx y quedaba demasiado largo.
+const PAGE_H = 475.5;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const IPANEL_LOGO_PATH = path.join(__dirname, 'assets', 'ipanel.png');
+const ASSETS_DIR = path.join(__dirname, 'assets');
+const IPANEL_LOGO_PATH = path.join(ASSETS_DIR, 'ipanel.png');
+const DEGRANDIS_LOGO_PATH = path.join(ASSETS_DIR, 'degrandis_logo.png');
 
 function clean(v) {
   if (v === null || v === undefined) return '';
@@ -34,6 +38,19 @@ function fmtDate(v) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function truncate(v, max = 24) {
+  const s = clean(v);
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1)).trim()}…`;
+}
+
+function fitFontSize(value, baseSize, width, maxCharsAtBase) {
+  const len = clean(value).length;
+  if (!len || len <= maxCharsAtBase) return baseSize;
+  const ratio = maxCharsAtBase / len;
+  return Math.max(7, Math.floor(baseSize * ratio * 10) / 10);
+}
+
 function text(doc, value, x, y, width, height, opts = {}) {
   const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
   doc.fillColor(opts.color || 'black');
@@ -44,6 +61,14 @@ function text(doc, value, x, y, width, height, opts = {}) {
     align: opts.align || 'left',
     valign: opts.valign || 'top',
     lineGap: opts.lineGap ?? 0,
+    ellipsis: opts.ellipsis ?? false,
+  });
+}
+
+function oneLine(doc, value, x, y, width, opts = {}) {
+  text(doc, truncate(value, opts.maxChars || 28), x, y, width, opts.height || 10, {
+    ...opts,
+    lineGap: 0,
   });
 }
 
@@ -54,20 +79,26 @@ function line(doc, x1, y1, x2, y2, width = 0.7) {
   doc.restore();
 }
 
-function box(doc, x, y, w, h, width = 0.7) {
-  doc.save();
-  doc.strokeColor('black').lineWidth(width);
-  doc.rect(x, y, w, h).stroke();
-  doc.restore();
+function drawDegrandisFallback(doc) {
+  text(doc, 'DG De Grandis', 11, 22, 153, 28, { size: 24, bold: true, align: 'center' });
+  text(doc, 'PORTONES', 26, 55, 123, 14, { size: 10, bold: true, align: 'center' });
 }
 
-function drawLogoPlaceholder(doc) {
-  // Encabezado vectorial para no depender de imagen externa dentro del PDF.
-  text(doc, 'DE GRANDIS', 13, 18, 150, 22, { size: 20, bold: true, align: 'center' });
-  text(doc, 'PORTONES', 22, 44, 132, 16, { size: 11, bold: true, align: 'center' });
-  line(doc, 18, 66, 158, 66, 1.2);
-  text(doc, 'www.degrandisportones.com', 19, 72, 138, 11, { size: 6.8, align: 'center' });
-  text(doc, 'Tel. 0353 4539099', 22, 85, 132, 10, { size: 7.4, align: 'center' });
+function drawDegrandisLogo(doc) {
+  if (fs.existsSync(DEGRANDIS_LOGO_PATH)) {
+    try {
+      doc.image(DEGRANDIS_LOGO_PATH, 10, 15, {
+        fit: [154, 56],
+        align: 'center',
+        valign: 'center',
+      });
+      return;
+    } catch (_) {
+      // Fallback vectorial si PDFKit no puede decodificar el PNG.
+    }
+  }
+
+  drawDegrandisFallback(doc);
 }
 
 function drawIpanelFallback(doc) {
@@ -91,89 +122,133 @@ function drawIpanelLogo(doc) {
   drawIpanelFallback(doc);
 }
 
-function drawBrandHeader(doc, label) {
-  if (label?.brand === 'ipanel') {
-    drawIpanelLogo(doc);
-    return;
+function drawPortonesSpecs(doc, label) {
+  const rows = [
+    ['COLOR PIERNAS:', dash(upper(label.colorPiernas))],
+    ['REVESTIMIENTO:', dash(upper(label.revestimiento))],
+    ['LISTON:', dash(upper(label.liston))],
+    ['PUERTA:', dash(upper(label.puerta))],
+    ['LUCERA:', dash(upper(label.lucera))],
+    ['ACCIONAMIENTO:', dash(upper(label.accionamiento))],
+  ];
+
+  let y = 176.4;
+  for (const [left, right] of rows) {
+    oneLine(doc, left, 6.3, y, 84.6, { size: 9.3, align: 'right', maxChars: 18 });
+    oneLine(doc, right, 94.3, y, 73.1, { size: 9.3, align: 'left', maxChars: 18 });
+    y += 10.5;
+  }
+}
+
+function drawPortonesDetails(doc, label) {
+  // Se quita REFERENCIA. El espacio de LOCALIDAD se usa como segunda línea de Dirección.
+  const rows = [
+    ['DIRECCION:', dash(upper(label.direccion))],
+    ['', dash(upper(label.direccion2))],
+    ['CLIENTE:', dash(upper(label.cliente))],
+    ['FECHA:', dash(fmtDate(label.fecha))],
+  ];
+
+  let y = 302.4;
+  for (const [left, right] of rows) {
+    oneLine(doc, left, 10.3, y, 67.6, { size: 8.3, align: 'right', maxChars: 12 });
+    oneLine(doc, right, 84.3, y, 75.4, { size: 8.3, align: 'left', maxChars: 19 });
+    y += 11.0;
+  }
+}
+
+function drawPortonesLabelPage(doc, label) {
+  drawDegrandisLogo(doc);
+
+  // Número principal: mismo bloque que la plantilla .lbx original.
+  text(doc, label.orderCode, 3.8, 104.4, 169.2, 45, { size: 33, align: 'center' });
+
+  drawPortonesSpecs(doc, label);
+
+  const tarea = upper(label.tarea || 'NO');
+  text(doc, tarea, 16.6, 258.4, 149.2, 31.8, {
+    size: fitFontSize(tarea, 27, 149.2, 12),
+    bold: false,
+    align: 'center',
+  });
+
+  drawPortonesDetails(doc, label);
+
+  text(doc, 'COMERCIALIZA', 8.3, 374.4, 90.2, 13.4, { size: 8.5, bold: true, align: 'center' });
+
+  const comercializa = upper(label.comercializa);
+  text(doc, comercializa, 19.5, 392.5, 136.4, 29.9, {
+    size: fitFontSize(comercializa, 20, 136.4, 12),
+    bold: true,
+    align: 'center',
+  });
+
+  text(doc, label.medidas ? `MEDIDAS: ${upper(label.medidas)}` : 'MEDIDAS:', 18.6, 432.4, 138.4, 13.4, {
+    size: 10.5,
+    bold: true,
+    align: 'center',
+  });
+}
+
+function drawIpanelLabelPage(doc, label) {
+  drawIpanelLogo(doc);
+
+  text(doc, label.topCode, 12.3, 108.4, 151, 22, { size: 18, bold: true, align: 'center' });
+  text(doc, label.orderCode, 3.8, 131.4, 169.2, 30, { size: 20, bold: true, align: 'center' });
+
+  const rows = [
+    ['PRODUCTO:', dash(label.producto)],
+    ['DETALLE:', dash(label.revestimiento)],
+    ['CANTIDAD:', dash(label.cantidad)],
+    ['UNIDAD:', dash(label.unidad)],
+    ['OBS.:', dash(label.observacionItem)],
+    ['ESTADO:', dash(label.estado)],
+  ];
+
+  let y = 176.4;
+  for (const [left, right] of rows) {
+    oneLine(doc, left, 6.3, y, 84.6, { size: 9.3, align: 'right', maxChars: 18 });
+    oneLine(doc, right, 94.3, y, 73.1, { size: 9.3, align: 'left', maxChars: 18 });
+    y += 10.5;
   }
 
-  drawLogoPlaceholder(doc);
+  text(doc, label.tarea || 'PANEL COMPUESTO', 16.6, 258.4, 149.2, 31.8, { size: 22, bold: true, align: 'center' });
+
+  const detailRows = [
+    ['DIRECCION:', dash(upper(label.direccion))],
+    ['LOCALIDAD:', dash(upper(label.localidad))],
+    ['CLIENTE:', dash(upper(label.cliente))],
+    ['REFERENCIA:', dash(upper(label.referencia))],
+    ['FECHA:', dash(fmtDate(label.fecha))],
+  ];
+
+  y = 302.4;
+  for (const [left, right] of detailRows) {
+    oneLine(doc, left, 10.3, y, 67.6, { size: 8.3, align: 'right', maxChars: 12 });
+    oneLine(doc, right, 84.3, y, 75.4, { size: 8.3, align: 'left', maxChars: 19 });
+    y += 11.0;
+  }
+
+  text(doc, 'COMERCIALIZA', 8.3, 374.4, 90.2, 13.4, { size: 8.5, bold: true, align: 'center' });
+  const comercializa = upper(label.comercializa || 'IPANEL');
+  text(doc, comercializa, 19.5, 392.5, 136.4, 29.9, {
+    size: fitFontSize(comercializa, 18, 136.4, 14),
+    bold: true,
+    align: 'center',
+  });
+  text(doc, label.medidas ? `MEDIDAS: ${upper(label.medidas)}` : 'MEDIDAS:', 18.6, 432.4, 138.4, 13.4, {
+    size: 10.5,
+    bold: true,
+    align: 'center',
+  });
 }
 
 function drawLabelPage(doc, label) {
-  const isIpanel = label?.brand === 'ipanel';
-  drawBrandHeader(doc, label);
-
-  if (isIpanel) {
-    text(doc, label.topCode, 12.3, 108.4, 151, 22, { size: 18, bold: true, align: 'center' });
-    text(doc, label.orderCode, 3.8, 131.4, 169.2, 30, { size: 20, bold: true, align: 'center' });
+  if (label?.brand === 'ipanel') {
+    drawIpanelLabelPage(doc, label || {});
   } else {
-    text(doc, label.topCode, 12.3, 26.4, 151, 42, { size: 34, bold: true, align: 'center' });
-    text(doc, label.orderCode, 3.8, 114.4, 169.2, 38.1, { size: 29, align: 'center' });
+    drawPortonesLabelPage(doc, label || {});
   }
-
-  const specLabels = [
-    isIpanel ? 'PRODUCTO:' : 'COLOR PIERNAS:',
-    isIpanel ? 'DETALLE:' : 'REVESTIMIENTO:',
-    isIpanel ? 'CANTIDAD:' : 'LISTON:',
-    isIpanel ? 'UNIDAD:' : 'PUERTA:',
-    isIpanel ? 'OBS.:' : 'LUCERA:',
-    isIpanel ? 'ESTADO:' : 'ACCIONAMIENTO:',
-  ].join('\n');
-  const specValues = [
-    dash(isIpanel ? label.producto : label.colorPiernas),
-    dash(isIpanel ? label.revestimiento : label.revestimiento),
-    dash(isIpanel ? label.cantidad : label.liston),
-    dash(isIpanel ? label.unidad : label.puerta),
-    dash(isIpanel ? label.observacionItem : label.lucera),
-    dash(isIpanel ? label.estado : label.accionamiento),
-  ].join('\n');
-  text(doc, specLabels, 6.3, 176.4, 84.6, 64.2, { size: 9.6, align: 'right', lineGap: 1.1 });
-  text(doc, specValues, 94.3, 174.4, 73.1, 67.8, { size: 9.6, align: 'left', lineGap: 1.1 });
-
-  text(doc, label.tarea || (isIpanel ? 'PANEL COMPUESTO' : 'INSTALACIÓN'), 16.6, 258.4, 149.2, 31.8, { size: 18, bold: true, align: 'center' });
-
-  const detailLabels = [
-    'DIRECCION:',
-    'LOCALIDAD:',
-    'CLIENTE:',
-    'REFERENCIA:',
-    'FECHA:',
-  ].join('\n');
-  const detailValues = [
-    dash(label.direccion),
-    dash(label.localidad),
-    dash(label.cliente),
-    dash(label.referencia),
-    dash(fmtDate(label.fecha)),
-  ].join('\n');
-  text(doc, detailLabels, 10.3, 302.4, 67.6, 59.5, { size: 9, align: 'right', lineGap: 1.1 });
-  text(doc, detailValues, 84.3, 300.4, 75.4, 61.9, { size: 9, align: 'left', lineGap: 1.1 });
-
-  text(doc, 'COMERCIALIZA', 8.3, 374.4, 90.2, 13.4, { size: 8.5, bold: true, align: 'center' });
-  text(doc, upper(label.comercializa), 44.1, 392.5, 86.4, 29.9, { size: 13, bold: true, align: 'center' });
-
-  text(doc, label.medidas ? `MEDIDAS: ${upper(label.medidas)}` : 'MEDIDAS:', 26.6, 432.4, 122.4, 13.4, { size: 8.8, bold: true, align: 'center' });
-  text(doc, [label.numeroInterno ? `N°${label.numeroInterno}` : '', label.referencia ? `REF: ${upper(label.referencia)}` : ''].filter(Boolean).join('\n'), 39.2, 486.6, 101.8, 39.8, { size: 13, bold: true, align: 'center' });
-  text(doc, label.remitosPendientes || 'REMITOS\nPENDIENTES', 10.3, 541, 153.8, 44.6, { size: 16, bold: true, align: 'center' });
-
-  const bottomLines = [
-    upper(label.material),
-    label.nv ? `NV ${label.nv}` : '',
-    upper(label.medidaFinal || label.medidas),
-  ].filter(Boolean).join('\n');
-  text(doc, bottomLines, 8.3, 602.4, 145.9, 47.8, { size: 13, bold: true, align: 'center', lineGap: 2 });
-
-  text(doc, upper(label.calculadora), 17.7, 672.2, 149.6, 22.3, { size: 14, bold: true, align: 'center' });
-  text(doc, upper(label.vendedor), 31.1, 728.8, 106.7, 22.3, { size: 13, bold: true, align: 'center' });
-  text(doc, upper(label.carpinteria), 37.5, 777.9, 97.8, 42.2, { size: 13, bold: true, align: 'center', lineGap: 2 });
-
-  // Guías sutiles para separar bloques, sin alterar el formato principal.
-  box(doc, 4.3, 8.4, 167.1, 813.4, 0.35);
-  line(doc, 8, 156, 168, 156, 0.35);
-  line(doc, 8, 248, 168, 248, 0.35);
-  line(doc, 8, 366, 168, 366, 0.35);
-  line(doc, 8, 594, 168, 594, 0.35);
 }
 
 export async function buildPortonLabelsPdf(labels) {
