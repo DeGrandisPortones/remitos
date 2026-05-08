@@ -211,17 +211,41 @@ function normalizeDimensionTokenToMm(token) {
   return String(Math.round(mm));
 }
 
-function medidasMmText(label) {
+function measurementPartsMm(label) {
   const source = clean(label?.medidas || label?.medidaFinal || '');
   const nums = extractMeasurementNumbers(source);
+
   if (nums.length >= 2) {
     const ancho = normalizeDimensionTokenToMm(nums[0]);
     const alto = normalizeDimensionTokenToMm(nums[1]);
-    if (ancho && alto) return `${ancho} X ${alto} MM`;
+    if (ancho && alto) return { ancho, alto };
   }
 
+  return { ancho: '', alto: '' };
+}
+
+function medidasMmText(label) {
+  const { ancho, alto } = measurementPartsMm(label);
+  if (ancho && alto) return `${ancho} X ${alto} MM`;
+
+  const source = clean(label?.medidas || label?.medidaFinal || '');
   if (!source || source.toUpperCase() === 'NO') return 'NO';
+
+  const nums = extractMeasurementNumbers(source);
+  if (nums.length === 1) {
+    const only = normalizeDimensionTokenToMm(nums[0]);
+    if (only) return `${only} MM`;
+  }
+
   return source.replace(/\s*mm\s*$/i, '').toUpperCase();
+}
+
+function medidasMmVerticalText(label) {
+  const { ancho, alto } = measurementPartsMm(label);
+  if (ancho && alto) return `${ancho}\nX\n${alto}`;
+
+  const text = medidasMmText(label);
+  return text === 'NO' ? 'NO' : text.replace(/\s+MM$/i, '');
 }
 
 function replaceData(xml, oldValue, newValue) {
@@ -272,7 +296,13 @@ function portonesLabelToXml(label) {
   xml = replaceData(xml, '-NEG MICRO\n-NEG MICRO\n-NO\n-NO\n-NO\n-AUT DERECHA', specs);
   xml = replaceData(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLabels);
   xml = replaceData(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', detailValues);
-  xml = replaceData(xml, 'INSTALACIÓN', upper(label.tarea || 'NO'));
+  const tarea = wrapWords(upper(label.tarea || 'NO'), 13, 2);
+  xml = replaceDataInTextObject(xml, 'INSTALACIÓN', tarea, (fragment) => {
+    const lines = tarea.split('\n').length;
+    const maxLen = Math.max(...tarea.split('\n').map((line) => line.length));
+    const size = lines > 1 ? (maxLen > 12 ? 16 : 18) : (maxLen > 12 ? 20 : 23);
+    return setTextObjectFontSize(fragment, size, size);
+  });
   xml = replaceDataInTextObject(xml, 'BARENGO', comercializa, (fragment) => {
     const lines = comercializa.split('\n').length;
     const maxLen = Math.max(...comercializa.split('\n').map((line) => line.length));
@@ -332,19 +362,18 @@ function escapeXmlPreserveWhitespace(v) {
 
 
 function prepareSmallTextFragment(fragment) {
-  // La etiqueta chica puede tener hasta 4 lineas: N°, REF linea 1, REF linea 2 y medidas.
+  // La etiqueta chica puede ocupar varias lineas: N°, REF envuelta por palabras y medidas verticales.
   // Activamos ajuste de texto y reducimos la tipografia para evitar recortes.
   return makeTextResponsive(fragment)
     .replace(/height="39\.8pt"/g, 'height="54pt"')
-    .replace(/size="24pt"/g, 'size="16pt"')
-    .replace(/size="11\.7pt"/g, 'size="8.2pt"')
-    .replace(/orgPoint="40pt"/g, 'orgPoint="15pt"')
-    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="8.2pt"');
+    .replace(/size="24pt"/g, 'size="14pt"')
+    .replace(/size="11\.7pt"/g, 'size="6.8pt"')
+    .replace(/orgPoint="40pt"/g, 'orgPoint="13pt"')
+    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="6.8pt"');
 }
 
 function smallMedidasText(label) {
-  const medidas = medidasMmText(label);
-  return medidas === 'NO' ? 'MED: NO' : `MED: ${medidas}`;
+  return medidasMmVerticalText(label);
 }
 
 function smallRefText(label) {
@@ -352,10 +381,15 @@ function smallRefText(label) {
   const nvMatch = nvRaw.match(/\d+/);
   const nv = nvMatch ? nvMatch[0] : nvRaw;
   const ref = [clean(label?.cliente), clean(label?.comercializa)].filter(Boolean).join(' / ') || 'NO';
-  const refLines = wrapWords(upper(ref), 13, 2).split('\n');
-  const firstRef = refLines.shift() || 'NO';
-  const refText = [`REF: ${firstRef}`, ...refLines].join('\n');
-  return `N°${nv}\n${refText}\n${smallMedidasText(label)}`;
+  const refLines = wrapWords(upper(ref), 9, 3).split('\n').filter(Boolean);
+
+  if (refLines.length) {
+    refLines[0] = `REF: ${refLines[0]}`;
+  } else {
+    refLines.push('REF: NO');
+  }
+
+  return [`N°${nv}`, ...refLines, smallMedidasText(label)].join('\n');
 }
 
 function buildSmallPortonesLabelXml(label, copies = 4) {
