@@ -114,7 +114,9 @@ function dash(v) {
 }
 
 function escapeXml(v) {
-  return clean(v)
+  // No usar clean() aca: clean() colapsa saltos de linea y en P-touch
+  // eso convierte campos multilinea en un string largo.
+  return String(v ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -231,12 +233,58 @@ function escapeXmlPreserveWhitespace(v) {
     .replace(/'/g, '&apos;');
 }
 
+
+function normalizeDimensionTokenToMm(token) {
+  const raw = clean(token).replace(/\s*mm\s*$/i, '').replace(',', '.');
+  if (!raw) return '';
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return clean(token).replace(/\s*mm\s*$/i, '');
+  const mm = Math.abs(n) < 100 ? n * 1000 : n;
+  return String(Math.round(mm));
+}
+
+function smallMedidasText(label) {
+  const source = clean(label?.medidas || label?.medidaFinal || '');
+  if (!source || source.toUpperCase() === 'NO') return 'MED: NO';
+
+  const cleaned = source
+    .replace(/^MEDIDAS\s*:\s*/i, '')
+    .replace(/\s*mm\s*$/i, '')
+    .trim();
+
+  const parts = cleaned.split(/\s*x\s*/i);
+  if (parts.length >= 2) {
+    const ancho = normalizeDimensionTokenToMm(parts[0]);
+    const alto = normalizeDimensionTokenToMm(parts[1]);
+    if (ancho && alto) return `MED: ${ancho}X${alto} MM`;
+  }
+
+  return `MED: ${cleaned.toUpperCase()} MM`;
+}
+
+function compactSmallRef(value, max = 28) {
+  const s = clean(value);
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1)).trim()}…`;
+}
+
+function prepareSmallTextFragment(fragment) {
+  // La etiqueta chica ahora tiene 3 lineas (N°, REF y medidas). Reducimos un poco
+  // la tipografia para que no se pisen las lineas en la cinta Brother.
+  return fragment
+    .replace(/height="39\.8pt"/g, 'height="46pt"')
+    .replace(/size="24pt"/g, 'size="18pt"')
+    .replace(/size="11\.7pt"/g, 'size="9pt"')
+    .replace(/orgPoint="40pt"/g, 'orgPoint="18pt"')
+    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="9pt"');
+}
+
 function smallRefText(label) {
   const nvRaw = clean(label?.nv || label?.orderCode || label?.topCode || '');
   const nvMatch = nvRaw.match(/\d+/);
   const nv = nvMatch ? nvMatch[0] : nvRaw;
   const ref = [clean(label?.cliente), clean(label?.comercializa)].filter(Boolean).join(' / ') || 'NO';
-  return `N°${nv}\nREF: ${ref}`;
+  return `N°${nv}\nREF: ${compactSmallRef(ref)}\n${smallMedidasText(label)}`;
 }
 
 function buildSmallPortonesLabelXml(label, copies = 4) {
@@ -259,7 +307,7 @@ function buildSmallPortonesLabelXml(label, copies = 4) {
     const suffix = `small${i + 1}`;
     const logo = shiftObjectFragment(smallLogo, delta, suffix);
     const textObj = replaceDataRaw(
-      shiftObjectFragment(smallText, delta, suffix),
+      prepareSmallTextFragment(shiftObjectFragment(smallText, delta, suffix)),
       'N°4165 \nREF: CORREDIZO ',
       escapeXmlPreserveWhitespace(textValue)
     );
@@ -326,7 +374,7 @@ function buildCompletePortonesLabelXml(label, smallCopies = 4) {
     const suffix = `completeSmall${i + 1}`;
     const logo = shiftObjectFragment(smallLogo, delta, suffix);
     const textObj = replaceDataRaw(
-      shiftObjectFragment(smallText, delta, suffix),
+      prepareSmallTextFragment(shiftObjectFragment(smallText, delta, suffix)),
       'N°4165 \nREF: CORREDIZO ',
       escapeXmlPreserveWhitespace(textValue)
     );
