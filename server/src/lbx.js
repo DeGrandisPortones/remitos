@@ -167,6 +167,35 @@ function makeTextResponsive(xml) {
     .replace(/autoLF="false"/g, 'autoLF="true"');
 }
 
+function setAttr(fragment, attrName, value) {
+  const re = new RegExp(` ${attrName}="[^"]*"`);
+  if (re.test(fragment)) return fragment.replace(re, ` ${attrName}="${value}"`);
+  return fragment.replace(/^(<[^>]+)/, `$1 ${attrName}="${value}"`);
+}
+
+function setTextBox(fragment, opts = {}) {
+  let out = fragment;
+  for (const [key, value] of Object.entries(opts)) {
+    if (value !== undefined && value !== null) out = setAttr(out, key, value);
+  }
+  return out;
+}
+
+function wrapValue(value, maxChars = 22, maxLines = 2) {
+  const lines = wrapWords(value, maxChars, maxLines).split('\n').filter(Boolean);
+  return lines.length ? lines : ['NO'];
+}
+
+function pairLines(prefix, value, maxChars = 34, maxLines = 2) {
+  const safePrefix = clean(prefix);
+  const val = clean(value) || '-NO';
+  const firstMax = Math.max(8, maxChars - safePrefix.length - 1);
+  const continuationMax = Math.max(8, maxChars - 2);
+  const parts = wrapWords(val, firstMax, maxLines).split('\n').filter(Boolean);
+  if (!parts.length) return [`${safePrefix} -NO`];
+  return parts.map((part, idx) => (idx === 0 ? `${safePrefix} ${part}` : `  ${wrapWords(part, continuationMax, 1)}`));
+}
+
 function replaceDataInTextObject(xml, oldValue, newValue, transform = null) {
   const oldTag = `<pt:data>${oldValue}</pt:data>`;
   const pattern = /<text:text>[\s\S]*?<\/text:text>/g;
@@ -272,44 +301,65 @@ function portonesLabelToXml(label) {
   let xml = fs.readFileSync(path.join(TEMPLATE_DIR, 'label.xml'), 'utf8').replace(/\r\n/g, '\n');
 
   const specs = [
-    dash(upper(label.colorPiernas || 'NO')),
-    dash(upper(label.revestimiento || 'NO')),
-    dash(upper(label.liston || 'NO')),
-    dash(upper(label.puerta || 'NO')),
-    dash(upper(label.lucera || 'NO')),
-    dash(upper(label.accionamiento || 'NO')),
+    `COLOR PIERNAS: ${dash(upper(label.colorPiernas || 'NO'))}`,
+    `REVESTIMIENTO: ${dash(upper(label.revestimiento || 'NO'))}`,
+    `LISTON: ${dash(upper(label.liston || 'NO'))}`,
+    `PUERTA: ${dash(upper(label.puerta || 'NO'))}`,
+    `LUCERA: ${dash(upper(label.lucera || 'NO'))}`,
+    `ACCIONAMIENTO: ${dash(upper(label.accionamiento || 'NO'))}`,
   ].join('\n');
 
-  const detailLabels = 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\n \nFECHA:';
-  const detailValues = [
-    dash(upper(label.direccion || 'NO')),
-    dash(upper(label.direccion2 || 'NO')),
-    dash(upper(label.cliente || 'NO')),
-    '-',
-    dash(fmtDate(label.fecha || new Date())),
+  const detailLines = [
+    ...pairLines('DIRECCION:', dash(upper(label.direccion || 'NO')), 34, 2),
+    ...pairLines('LOCALIDAD:', dash(upper(label.direccion2 || 'NO')), 34, 2),
+    ...pairLines('CLIENTE:', dash(upper(label.cliente || 'NO')), 34, 2),
+    `FECHA: ${dash(fmtDate(label.fecha || new Date()))}`,
   ].join('\n');
 
   const medidas = medidasMmText(label);
-  const comercializa = wrapWords(upper(label.comercializa || 'NO'), 10, 2);
+  const comercializa = wrapWords(upper(label.comercializa || 'NO'), 15, 3);
 
-  xml = replaceData(xml, 'N°3463/3309 ', label.orderCode || label.topCode || 'N°');
-  xml = replaceData(xml, '-NEG MICRO\n-NEG MICRO\n-NO\n-NO\n-NO\n-AUT DERECHA', specs);
-  xml = replaceData(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLabels);
-  xml = replaceData(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', detailValues);
+  xml = replaceDataInTextObject(xml, 'N°3463/3309 ', label.orderCode || label.topCode || 'N°', (fragment) =>
+    setTextBox(fragment, { size: '31pt', orgPoint: '31pt', shrink: 'true', autoLF: 'true' })
+  );
+
+  // La plantilla original tiene las etiquetas de especificaciones y los valores en dos objetos.
+  // Para evitar que P-touch junte todos los valores en una sola linea cuando algo es largo,
+  // usamos un unico objeto de ancho completo, con un renglon por dato.
+  xml = replaceDataInTextObject(xml, 'COLOR PIERNAS:\nREVESTIMIENTO:\nLISTON:\nPUERTA:\nLUCERA:\nACCIONAMIENTO:', specs, (fragment) =>
+    setTextBox(fragment, { x: '6pt', y: '171.5pt', width: '164pt', height: '75pt', size: '7.4pt', orgPoint: '7.4pt', shrink: 'true', autoLF: 'true' })
+  );
+  xml = replaceDataInTextObject(xml, '-NEG MICRO\n-NEG MICRO\n-NO\n-NO\n-NO\n-AUT DERECHA', ' ', (fragment) =>
+    setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
+  );
+
   const tarea = wrapWords(upper(label.tarea || 'NO'), 13, 2);
   xml = replaceDataInTextObject(xml, 'INSTALACIÓN', tarea, (fragment) => {
     const lines = tarea.split('\n').length;
     const maxLen = Math.max(...tarea.split('\n').map((line) => line.length));
-    const size = lines > 1 ? (maxLen > 12 ? 16 : 18) : (maxLen > 12 ? 20 : 23);
-    return setTextObjectFontSize(fragment, size, size);
+    const size = lines > 1 ? (maxLen > 12 ? 14 : 16) : (maxLen > 12 ? 18 : 20);
+    return setTextBox(fragment, { size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' });
   });
+
+  // Igual que las especificaciones: datos de direccion/cliente/fecha en un solo objeto ancho.
+  // Si un valor no entra, se parte por palabras y sigue abajo.
+  xml = replaceDataInTextObject(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLines, (fragment) =>
+    setTextBox(fragment, { x: '8pt', y: '300.4pt', width: '160pt', height: '70pt', size: '6.9pt', orgPoint: '6.9pt', shrink: 'true', autoLF: 'true' })
+  );
+  xml = replaceDataInTextObject(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', ' ', (fragment) =>
+    setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
+  );
+
   xml = replaceDataInTextObject(xml, 'BARENGO', comercializa, (fragment) => {
     const lines = comercializa.split('\n').length;
     const maxLen = Math.max(...comercializa.split('\n').map((line) => line.length));
-    const size = lines > 1 ? (maxLen > 12 ? 14 : 16) : (maxLen > 10 ? 18 : 22);
-    return setTextObjectFontSize(fragment, size, size);
+    const size = lines > 1 ? (maxLen > 14 ? 11 : 13) : (maxLen > 15 ? 14 : 17);
+    return setTextBox(fragment, { x: '12pt', width: '151pt', height: '43pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' });
   });
-  xml = replaceData(xml, 'MEDIDAS: 2980X2380', `MEDIDAS: ${medidas}`);
+
+  xml = replaceDataInTextObject(xml, 'MEDIDAS: 2980X2380', `MEDIDAS: ${medidas}`, (fragment) =>
+    setTextBox(fragment, { x: '8pt', width: '160pt', size: '8.4pt', orgPoint: '8.4pt', shrink: 'true', autoLF: 'true' })
+  );
 
   // Texto auxiliar superior de la plantilla original. Lo dejamos vacio para no interferir con el logo.
   xml = replaceDataRaw(xml, '267', ' ');
@@ -362,14 +412,18 @@ function escapeXmlPreserveWhitespace(v) {
 
 
 function prepareSmallTextFragment(fragment) {
-  // La etiqueta chica puede ocupar varias lineas: N°, REF envuelta por palabras y medidas verticales.
-  // Activamos ajuste de texto y reducimos la tipografia para evitar recortes.
-  return makeTextResponsive(fragment)
-    .replace(/height="39\.8pt"/g, 'height="54pt"')
-    .replace(/size="24pt"/g, 'size="14pt"')
-    .replace(/size="11\.7pt"/g, 'size="6.8pt"')
-    .replace(/orgPoint="40pt"/g, 'orgPoint="13pt"')
-    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="6.8pt"');
+  // La etiqueta chica ahora lleva N°, REF envuelta por palabras y medidas verticales.
+  // Se agranda el area de texto hacia la derecha y se baja la tipografia para que no corte.
+  let out = makeTextResponsive(fragment)
+    .replace(/height="39\.8pt"/g, 'height="57pt"')
+    .replace(/width="101\.8pt"/g, 'width="126pt"')
+    .replace(/x="39\.2pt"/g, 'x="35pt"')
+    .replace(/size="24pt"/g, 'size="6.2pt"')
+    .replace(/size="11\.7pt"/g, 'size="6.2pt"')
+    .replace(/orgPoint="40pt"/g, 'orgPoint="6.2pt"')
+    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="6.2pt"');
+  out = setTextBox(out, { width: '126pt', height: '57pt', size: '6.2pt', orgPoint: '6.2pt', shrink: 'true', autoLF: 'true' });
+  return out;
 }
 
 function smallMedidasText(label) {
@@ -381,8 +435,10 @@ function smallRefText(label) {
   const nvMatch = nvRaw.match(/\d+/);
   const nv = nvMatch ? nvMatch[0] : nvRaw;
   const ref = [clean(label?.cliente), clean(label?.comercializa)].filter(Boolean).join(' / ') || 'NO';
-  const refLines = wrapWords(upper(ref), 9, 3).split('\n').filter(Boolean);
 
+  // Partimos por palabras para que "ABERTURAS PH" no quede como "ABERTU".
+  // Maximo 3 lineas de referencia, asi queda espacio para las medidas verticales.
+  const refLines = wrapWords(upper(ref), 15, 3).split('\n').filter(Boolean);
   if (refLines.length) {
     refLines[0] = `REF: ${refLines[0]}`;
   } else {
