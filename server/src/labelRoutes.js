@@ -82,66 +82,92 @@ async function tryQuery(pool, attempts, inputs = {}) {
   return [];
 }
 
+const PRE_PRODUCCION_COLUMNS = `
+  [ID],
+  [PARTIDA],
+  [NV],
+  [Nombre],
+  [Direccion],
+  [ID_cliente],
+  [RazSoc],
+  [Fecha_NV],
+  [ID_Sistema],
+  [Sistema],
+  [Ancho],
+  [Alto],
+  [Peso],
+  [Fecha_Entrega],
+  [Fecha_Inicio],
+  [Estado],
+  [Revestimiento],
+  [Lucera],
+  [Color],
+  [Liston],
+  [PARANTES_Cantidad],
+  [PARANTES_Distribucion],
+  [Color_Sistema],
+  [PUERTA_Posicion],
+  [MOTOR_Condicion],
+  [MOTOR_Posicion],
+  [PASADOR_Condicion],
+  [PASADOR_Armado],
+  [INSTALACION_Instalador],
+  [INSTALACION_Empotraduras],
+  [INSTALACION_Posicion],
+  [PARANTES_Descripcion],
+  [PIERNAS_Tipo],
+  [PIERNAS_Altura],
+  [Tipo_Embalaje],
+  [Tipo_Canasto],
+  [Tipo_Cables],
+  [Tipo_Espada],
+  [Color_Hoja]
+`;
+
 async function fetchPreProduccionPortonesByNv(pool, nv) {
+  const nvText = String(nv).trim();
+
   return tryQuery(pool, [
     {
-      name: 'WebApp.dbo.Pre_Produccion por NV',
+      name: 'WebApp pool dbo.Pre_Produccion por NV como texto',
       sql: `
-        SELECT TOP (1000)
-          [ID],
-          [PARTIDA],
-          [NV],
-          [Nombre],
-          [Direccion],
-          [ID_cliente],
-          [RazSoc],
-          [Fecha_NV],
-          [ID_Sistema],
-          [Sistema],
-          [Ancho],
-          [Alto],
-          [Peso],
-          [Fecha_Entrega],
-          [Fecha_Inicio],
-          [Estado],
-          [Revestimiento],
-          [Lucera],
-          [Color],
-          [Liston],
-          [PARANTES_Cantidad],
-          [PARANTES_Distribucion],
-          [Color_Sistema],
-          [PUERTA_Posicion],
-          [MOTOR_Condicion],
-          [MOTOR_Posicion],
-          [PASADOR_Condicion],
-          [PASADOR_Armado],
-          [INSTALACION_Instalador],
-          [INSTALACION_Empotraduras],
-          [INSTALACION_Posicion],
-          [PARANTES_Descripcion],
-          [PIERNAS_Tipo],
-          [PIERNAS_Altura],
-          [Tipo_Embalaje],
-          [Tipo_Canasto],
-          [Tipo_Cables],
-          [Tipo_Espada],
-          [Color_Hoja]
-        FROM [WebApp].[dbo].[Pre_Produccion]
-        WHERE TRY_CONVERT(int, [NV]) = @nv
-        ORDER BY TRY_CONVERT(int, [PARTIDA]), TRY_CONVERT(int, [ID]), [ID];
+        SELECT TOP (1000) ${PRE_PRODUCCION_COLUMNS}
+        FROM [dbo].[Pre_Produccion]
+        WHERE LTRIM(RTRIM(CONVERT(varchar(50), [NV]))) = @nvText
+        ORDER BY [ID];
       `,
     },
     {
-      name: 'dbo.Pre_Produccion por NV',
+      name: 'WebApp pool dbo.Pre_Produccion por NV numerico',
       sql: `
-        SELECT TOP (1000) *
+        SELECT TOP (1000) ${PRE_PRODUCCION_COLUMNS}
         FROM [dbo].[Pre_Produccion]
         WHERE TRY_CONVERT(int, [NV]) = @nv
-        ORDER BY TRY_CONVERT(int, [PARTIDA]), TRY_CONVERT(int, [ID]), [ID];
+        ORDER BY TRY_CONVERT(int, [ID]), [ID];
       `,
     },
-  ], { nv: { type: sql.Int, value: nv } });
+    {
+      name: 'Cross database WebApp.dbo.Pre_Produccion por NV como texto',
+      sql: `
+        SELECT TOP (1000) ${PRE_PRODUCCION_COLUMNS}
+        FROM [WebApp].[dbo].[Pre_Produccion]
+        WHERE LTRIM(RTRIM(CONVERT(varchar(50), [NV]))) = @nvText
+        ORDER BY [ID];
+      `,
+    },
+    {
+      name: 'Cross database WebApp.dbo.Pre_Produccion por NV numerico',
+      sql: `
+        SELECT TOP (1000) ${PRE_PRODUCCION_COLUMNS}
+        FROM [WebApp].[dbo].[Pre_Produccion]
+        WHERE TRY_CONVERT(int, [NV]) = @nv
+        ORDER BY TRY_CONVERT(int, [ID]), [ID];
+      `,
+    },
+  ], {
+    nv: { type: sql.Int, value: nv },
+    nvText: { type: sql.VarChar(50), value: nvText },
+  });
 }
 
 async function fetchVentaByNv(pool, nv) {
@@ -418,7 +444,9 @@ async function handleLabelsByNv(req, res, forcedEmpresa) {
   }
 
   const empresa = resolveEmpresa(req, forcedEmpresa);
-  const dbName = empresa === 'ipanel' ? 'Paneles' : 'Portones';
+  // Portones: la etiqueta sale de WebApp.dbo.Pre_Produccion.
+  // Ipanels: se mantiene la lectura desde Paneles/remitos.
+  const dbName = empresa === 'ipanel' ? 'Paneles' : 'WebApp';
 
   try {
     const pool = await getPool(dbName);

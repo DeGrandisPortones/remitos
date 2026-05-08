@@ -1,72 +1,58 @@
-# Etiquetas por NV
+# Etiquetas Brother - Remitos
 
-Este patch corrige la generación de etiquetas para Portones para que ya no dependa del remito.
+## Cambio principal
 
-## Portones
-
-El endpoint de etiquetas consulta directamente:
+Para Portones, el endpoint de etiquetas ahora conecta directamente a la base `WebApp` y consulta:
 
 ```sql
-[WebApp].[dbo].[Pre_Produccion]
+SELECT TOP (1000) ...
+FROM dbo.Pre_Produccion
+WHERE NV = @nv
 ```
 
-por el campo `NV`.
+También deja fallbacks con comparación como texto y consulta cross database `[WebApp].[dbo].[Pre_Produccion]` para cubrir ambos escenarios.
 
-Campos usados en la etiqueta:
+Esto corrige el caso donde la NV existe en `WebApp.dbo.Pre_Produccion`, pero no se encontraba porque el pool anterior estaba conectado a `Portones`.
 
-- `NV`
-- `PARTIDA`
-- `Nombre`
-- `Direccion`
-- `RazSoc`
-- `Sistema`
-- `Ancho`
-- `Alto`
-- `Revestimiento`
-- `Lucera`
-- `Color`
-- `Liston`
-- `Color_Sistema`
-- `Color_Hoja`
-- `PUERTA_Posicion`
-- `MOTOR_Condicion`
-- `MOTOR_Posicion`
-- `Estado`
-
-La fecha impresa en la etiqueta es la fecha actual, es decir, la fecha en que se genera/imprime la etiqueta.
-
-Endpoint principal:
+## Endpoint
 
 ```txt
-/api/etiquetas/portones/by-nv?nv=4005&empresa=portones
+GET /api/etiquetas/portones/by-nv?nv=4017&empresa=portones
+GET /api/etiquetas/by-nv?nv=4017&empresa=portones
 ```
 
-También funciona el endpoint genérico:
+## Datos usados para Portones
 
-```txt
-/api/etiquetas/by-nv?nv=4005&empresa=portones
-```
+- NV
+- PARTIDA
+- Nombre
+- Direccion
+- RazSoc
+- Sistema
+- Ancho
+- Alto
+- Revestimiento
+- Lucera
+- Color
+- Liston
+- Color_Sistema
+- Color_Hoja
+- Estado
+
+La fecha impresa es la fecha actual de generación.
 
 ## Ipanels
 
-Se mantiene la lógica anterior para Ipanels, con el logo de Ipanels incluido en:
-
-```txt
-server/src/assets/ipanel.png
-```
-
-Endpoint:
-
-```txt
-/api/etiquetas/ipanel/by-nv?nv=100414&empresa=ipanel
-```
+Ipanels mantiene la lógica anterior usando `Paneles`, remito e ítems, con el logo `server/src/assets/ipanel.png`.
 
 ## Archivos incluidos
 
-- `server/src/labelRoutes.js`: reemplazar este archivo completo.
-- `server/src/labelPdf.js`: generador PDF de etiquetas.
-- `server/src/index.js`: monta rutas de etiquetas si aún no estaban montadas.
-- `server/src/assets/ipanel.png`: logo Ipanels para PDF.
-- `client/src/api.js`: helpers del frontend para abrir etiquetas.
+Copiar estos archivos sobre el proyecto:
 
-No se incluye `client/src/App.jsx` porque la app que ya tenés desplegada ya muestra el botón `Etiqueta`.
+- `server/src/labelRoutes.js`
+- `server/src/labelPdf.js`
+- `server/src/index.js`
+- `server/src/assets/ipanel.png`
+- `client/src/api.js`
+
+Después redeployar backend y frontend.
