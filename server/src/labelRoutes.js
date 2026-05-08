@@ -379,7 +379,7 @@ function shortMotorCondicion(value) {
     .toUpperCase();
 
   if (normalized === 'AUTOMATICO') return 'AUT';
-  if (normalized === 'MANUAL') return 'MAN';
+  if (normalized === 'MANUAL') return 'MANUAL';
   return s;
 }
 

@@ -29,3 +29,8 @@ Copiar estos archivos sobre el repo `remitos` y redeployar backend y frontend.
 - `client/src/api.js`
 - `client/src/App.jsx`
 - `client/src/styles.css`
+
+
+## Ajuste accionamiento
+
+Cuando `MOTOR_Condicion` es `MANUAL`, la etiqueta imprime `MANUAL` completo. Cuando es `AUTOMATICO`, imprime `AUT`. En ambos casos se concatena con `MOTOR_Posicion`.
