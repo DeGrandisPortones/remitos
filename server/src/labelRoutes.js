@@ -46,6 +46,10 @@ function resolveEmpresa(req, forcedEmpresa) {
   return 'portones';
 }
 
+function joinParts(parts, sep = ' ') {
+  return parts.map(clean).filter(Boolean).join(sep);
+}
+
 function formatMedidas(row) {
   const explicit = pick(row, [
     'MEDIDAS', 'Medidas', 'medidas', 'Medida', 'medida',
@@ -53,28 +57,12 @@ function formatMedidas(row) {
   ]);
   if (clean(explicit)) return explicit;
 
-  const ancho = pick(row, ['ANCHO', 'Ancho', 'ancho', 'ANCHO_MM', 'ancho_mm', 'LuzAncho', 'luz_ancho']);
-  const alto = pick(row, ['ALTO', 'Alto', 'alto', 'ALTO_MM', 'alto_mm', 'LuzAlto', 'luz_alto']);
+  const ancho = pick(row, ['Ancho', 'ANCHO', 'ancho', 'ANCHO_MM', 'ancho_mm']);
+  const alto = pick(row, ['Alto', 'ALTO', 'alto', 'ALTO_MM', 'alto_mm']);
   const a = clean(ancho);
   const h = clean(alto);
-  if (a && h) return `${a}X${h}`;
+  if (a && h) return `${a} x ${h}`;
   return a || h || '';
-}
-
-function formatMedidaFinal(row, medidas) {
-  const explicit = pick(row, [
-    'MEDIDA_FINAL', 'Medida_Final', 'Medida Final', 'medida_final',
-    'MEDIDA_FINAL_ETIQUETA', 'Medida Final Etiqueta',
-  ]);
-  if (clean(explicit)) return explicit;
-
-  const ancho = pick(row, ['ANCHO_FINAL', 'Ancho Final', 'ancho_final', 'ANCHO_MM_FINAL']);
-  const alto = pick(row, ['ALTO_FINAL', 'Alto Final', 'alto_final', 'ALTO_MM_FINAL']);
-  const a = clean(ancho);
-  const h = clean(alto);
-  if (a && h) return `${a} mm x ${h} mm`;
-
-  return medidas;
 }
 
 async function tryQuery(pool, attempts, inputs = {}) {
@@ -86,31 +74,71 @@ async function tryQuery(pool, attempts, inputs = {}) {
       }
       const result = await req.query(attempt.sql);
       return result.recordset || [];
-    } catch (_) {
+    } catch (err) {
+      console.warn(`No se pudo ejecutar query de etiquetas (${attempt.name}):`, err?.message || err);
       continue;
     }
   }
   return [];
 }
 
-async function fetchPortonesByNv(pool, nv) {
+async function fetchPreProduccionPortonesByNv(pool, nv) {
   return tryQuery(pool, [
     {
-      name: 'WebApp.dbo.Pre_Produccion',
+      name: 'WebApp.dbo.Pre_Produccion por NV',
       sql: `
-        SELECT TOP (100) *
-        FROM WebApp.dbo.Pre_Produccion
-        WHERE TRY_CONVERT(int, NV) = @nv
-        ORDER BY TRY_CONVERT(int, ID), ID;
+        SELECT TOP (1000)
+          [ID],
+          [PARTIDA],
+          [NV],
+          [Nombre],
+          [Direccion],
+          [ID_cliente],
+          [RazSoc],
+          [Fecha_NV],
+          [ID_Sistema],
+          [Sistema],
+          [Ancho],
+          [Alto],
+          [Peso],
+          [Fecha_Entrega],
+          [Fecha_Inicio],
+          [Estado],
+          [Revestimiento],
+          [Lucera],
+          [Color],
+          [Liston],
+          [PARANTES_Cantidad],
+          [PARANTES_Distribucion],
+          [Color_Sistema],
+          [PUERTA_Posicion],
+          [MOTOR_Condicion],
+          [MOTOR_Posicion],
+          [PASADOR_Condicion],
+          [PASADOR_Armado],
+          [INSTALACION_Instalador],
+          [INSTALACION_Empotraduras],
+          [INSTALACION_Posicion],
+          [PARANTES_Descripcion],
+          [PIERNAS_Tipo],
+          [PIERNAS_Altura],
+          [Tipo_Embalaje],
+          [Tipo_Canasto],
+          [Tipo_Cables],
+          [Tipo_Espada],
+          [Color_Hoja]
+        FROM [WebApp].[dbo].[Pre_Produccion]
+        WHERE TRY_CONVERT(int, [NV]) = @nv
+        ORDER BY TRY_CONVERT(int, [PARTIDA]), TRY_CONVERT(int, [ID]), [ID];
       `,
     },
     {
-      name: 'dbo.Pre_Produccion',
+      name: 'dbo.Pre_Produccion por NV',
       sql: `
-        SELECT TOP (100) *
-        FROM dbo.Pre_Produccion
-        WHERE TRY_CONVERT(int, NV) = @nv
-        ORDER BY TRY_CONVERT(int, ID), ID;
+        SELECT TOP (1000) *
+        FROM [dbo].[Pre_Produccion]
+        WHERE TRY_CONVERT(int, [NV]) = @nv
+        ORDER BY TRY_CONVERT(int, [PARTIDA]), TRY_CONVERT(int, [ID]), [ID];
       `,
     },
   ], { nv: { type: sql.Int, value: nv } });
@@ -136,142 +164,8 @@ async function fetchVentaByNv(pool, nv) {
         ORDER BY cfecha DESC;
       `,
     },
-    {
-      name: 'Portones.dbo.NTASVTAS por numero',
-      sql: `
-        SELECT TOP (1) *
-        FROM Portones.dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv
-        ORDER BY fecha DESC;
-      `,
-    },
   ], { nv: { type: sql.Int, value: nv } });
   return rows[0] || null;
-}
-
-async function fetchFacturaByNv(pool, nv) {
-  const rows = await tryQuery(pool, [
-    {
-      name: 'NTASVTAS numero/factura/fecha',
-      sql: `
-        SELECT TOP (10) numero, factura, fecha
-        FROM dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv AND factura IS NOT NULL
-        ORDER BY fecha DESC;
-      `,
-    },
-    {
-      name: 'NTASVTAS numero/factura/cfecha',
-      sql: `
-        SELECT TOP (10) numero, factura, cfecha
-        FROM dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv AND factura IS NOT NULL
-        ORDER BY cfecha DESC;
-      `,
-    },
-    {
-      name: 'Portones.dbo.NTASVTAS numero/factura',
-      sql: `
-        SELECT TOP (10) numero, factura
-        FROM Portones.dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv AND factura IS NOT NULL;
-      `,
-    },
-  ], { nv: { type: sql.Int, value: nv } });
-
-  const first = rows.find((r) => r?.factura !== null && r?.factura !== undefined);
-  return first?.factura ?? null;
-}
-
-async function fetchRemitosByFactura(pool, factura) {
-  const f = Number(factura);
-  if (!Number.isFinite(f)) return [];
-
-  return tryQuery(pool, [
-    {
-      name: 'REMITOS por facnro',
-      sql: `
-        SELECT TOP (20) r.*
-        FROM dbo.REMITOS r
-        INNER JOIN (
-          SELECT DISTINCT tipo, sucursal, numero
-          FROM dbo.IREMITOS
-          WHERE facnro = @factura
-        ) i ON i.tipo = r.tipo AND i.sucursal = r.sucursal AND i.numero = r.numero
-        ORDER BY r.fecha DESC;
-      `,
-    },
-  ], { factura: { type: sql.Int, value: Math.trunc(f) } });
-}
-
-async function fetchPortonesItemsForRemito(pool, remito) {
-  const tipo = clean(remito?.tipo);
-  const sucursal = parseIntSafe(remito?.sucursal);
-  const numero = parseIntSafe(remito?.numero);
-  if (!tipo || sucursal === null || numero === null) return [];
-
-  const inputs = {
-    tipo: { type: sql.VarChar(10), value: tipo },
-    sucursal: { type: sql.Int, value: sucursal },
-    numero: { type: sql.Int, value: numero },
-  };
-
-  return tryQuery(pool, [
-    {
-      name: 'Portones IREMITOS + PRODUCTOS',
-      sql: `
-        SELECT TOP (200)
-          i.rnd, i.producto, i.cantidad, i.uventa,
-          i.tipo, i.sucursal, i.numero,
-          i.deposito, i.facnro, i.facfecha,
-          p.descripcion AS descripcion
-        FROM dbo.IREMITOS i
-        LEFT JOIN dbo.PRODUCTOS p ON p.codigo = i.producto
-        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
-        ORDER BY ISNULL(i.rnd, 9999), i.producto;
-      `,
-    },
-    {
-      name: 'Portones IREMITOS + ARTICULOS descripcion',
-      sql: `
-        SELECT TOP (200)
-          i.rnd, i.producto, i.cantidad, i.uventa,
-          i.tipo, i.sucursal, i.numero,
-          i.deposito, i.facnro, i.facfecha,
-          a.descripcion AS descripcion
-        FROM dbo.IREMITOS i
-        LEFT JOIN dbo.ARTICULOS a ON a.codigo = i.producto
-        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
-        ORDER BY ISNULL(i.rnd, 9999), i.producto;
-      `,
-    },
-    {
-      name: 'Portones IREMITOS + ARTICULOS detalle',
-      sql: `
-        SELECT TOP (200)
-          i.rnd, i.producto, i.cantidad, i.uventa,
-          i.tipo, i.sucursal, i.numero,
-          i.deposito, i.facnro, i.facfecha,
-          a.detalle AS descripcion
-        FROM dbo.IREMITOS i
-        LEFT JOIN dbo.ARTICULOS a ON a.codart = i.producto
-        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
-        ORDER BY ISNULL(i.rnd, 9999), i.producto;
-      `,
-    },
-    {
-      name: 'Portones IREMITOS base',
-      sql: `
-        SELECT TOP (200)
-          i.rnd, i.producto, i.cantidad, i.uventa,
-          i.tipo, i.sucursal, i.numero,
-          i.deposito, i.facnro, i.facfecha
-        FROM dbo.IREMITOS i
-        WHERE i.tipo = @tipo AND i.sucursal = @sucursal AND i.numero = @numero
-        ORDER BY ISNULL(i.rnd, 9999), i.producto;
-      `,
-    },
-  ], inputs);
 }
 
 async function fetchPanelesRemitoByNv(pool, nv) {
@@ -407,16 +301,6 @@ async function fetchPanelesItems(pool, remito, header) {
   ], inputs);
 }
 
-function remitosLabel(remitos) {
-  if (!Array.isArray(remitos) || remitos.length === 0) return 'REMITOS\nPENDIENTES';
-  const valid = remitos.filter((r) => !r?.anulado);
-  if (valid.length === 0) return 'REMITOS\nPENDIENTES';
-  return valid
-    .slice(0, 3)
-    .map((r) => `REMITO ${clean(r.sucursal)}-${clean(r.numero)}`)
-    .join('\n');
-}
-
 function panelRemitoLabel(header, remito) {
   const suc = firstNonEmpty(header?.sucursal, '');
   const nro = firstNonEmpty(header?.numero, remito);
@@ -424,100 +308,46 @@ function panelRemitoLabel(header, remito) {
   return `REMITO ${clean(suc)}-${clean(nro)}`;
 }
 
-function toPortonLabel(row, venta, remitos, nv, index) {
+function toPortonPreProduccionLabel(row, nv, index) {
   const medidas = formatMedidas(row);
-  const medidaFinal = formatMedidaFinal(row, medidas);
   const partida = pick(row, ['PARTIDA', 'Partida', 'partida']);
-  const subpartida = pick(row, ['SUBPARTIDA', 'Subpartida', 'subpartida', 'ITEM', 'Item']);
-  const numeroInterno = pick(row, ['Numero', 'Nro', 'Nro Porton', 'Numero Porton', 'ID', 'Id', 'id']);
-
-  const orderCode = partida
-    ? `N°${clean(partida)}${clean(subpartida) ? `/${clean(subpartida)}` : ''}`
-    : `NV ${nv}`;
-
-  return {
-    brand: 'portones',
-    topCode: firstNonEmpty(pick(row, ['Etiqueta', 'Nro Etiqueta', 'Numero Etiqueta', 'Orden Etiqueta']), index),
-    orderCode,
-    colorPiernas: pick(row, ['COLOR_PIERNAS', 'Color Piernas', 'color_piernas', 'Color_Piernas']),
-    revestimiento: pick(row, ['REVESTIMIENTO', 'Revestimiento', 'revestimiento']),
-    liston: pick(row, ['LISTON', 'Liston', 'Listón', 'liston']),
-    puerta: pick(row, ['PUERTA', 'Puerta', 'puerta']),
-    lucera: pick(row, ['LUCERA', 'Lucera', 'lucera']),
-    accionamiento: pick(row, ['ACCIONAMIENTO', 'Accionamiento', 'accionamiento']),
-    tarea: firstNonEmpty(pick(row, ['TAREA', 'Tarea', 'Tipo Trabajo', 'tipo_trabajo']), 'INSTALACIÓN'),
-    direccion: firstNonEmpty(pick(row, ['DIRECCION', 'Direccion', 'Dirección', 'direccion']), pick(venta, ['dirent', 'direccion', 'Dirección'])),
-    localidad: firstNonEmpty(pick(row, ['LOCALIDAD', 'Localidad', 'localidad']), pick(venta, ['localidad'])),
-    cliente: firstNonEmpty(pick(row, ['CLIENTE', 'Cliente', 'cliente', 'Nombre Cliente']), pick(venta, ['nombre'])),
-    referencia: pick(row, ['REFERENCIA', 'Referencia', 'referencia', 'REF', 'Ref', 'Tipo', 'Modelo', 'Sistema']),
-    fecha: firstNonEmpty(pick(row, ['FECHA', 'Fecha', 'fecha', 'Fecha_NV', 'fecha_nv']), pick(venta, ['fecha', 'cfecha'])),
-    comercializa: firstNonEmpty(pick(row, ['COMERCIALIZA', 'Comercializa', 'comercializa']), pick(venta, ['vendedor'])),
-    medidas,
-    numeroInterno,
-    remitosPendientes: remitosLabel(remitos),
-    material: pick(row, ['MATERIAL', 'Material', 'material', 'Color', 'COLOR', 'Acabado', 'Terminacion', 'Terminación']),
-    nv,
-    medidaFinal,
-    calculadora: firstNonEmpty(pick(row, ['CALCULADORA', 'Calculadora', 'calculadora', 'Operador Calculadora']), pick(venta, ['operador'])),
-    vendedor: firstNonEmpty(pick(row, ['VENDEDOR', 'Vendedor', 'vendedor']), pick(venta, ['vendedor'])),
-    carpinteria: pick(row, ['CARPINTERIA', 'Carpinteria', 'Carpintería', 'carpinteria', 'Proveedor', 'Taller']),
-  };
-}
-
-
-function toPortonFallbackLabel(row, venta, remito, remitos, nv, index) {
-  const producto = pick(row, ['producto', 'Producto', 'codigo', 'Código', 'codart']);
-  const descripcion = pick(row, ['descripcion', 'Descripción', 'detalle', 'Detalle', 'articulo', 'Artículo']);
-  const cantidad = pick(row, ['cantidad', 'Cantidad', 'cant', 'Cant']);
-  const unidad = pick(row, ['uventa', 'Unidad', 'unidad', 'umedida']);
-  const medidas = firstNonEmpty(formatMedidas(row), descripcion);
-  const remitoNumero = firstNonEmpty(remito?.numero, row?.numero);
+  const id = pick(row, ['ID', 'Id', 'id']);
+  const nombre = pick(row, ['Nombre', 'NOMBRE', 'nombre']);
+  const razSoc = pick(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social']);
+  const colorHoja = pick(row, ['Color_Hoja', 'COLOR_HOJA', 'Color Hoja']);
+  const sistema = pick(row, ['Sistema', 'SISTEMA', 'sistema']);
+  const motor = joinParts([
+    pick(row, ['MOTOR_Condicion', 'Motor Condicion']),
+    pick(row, ['MOTOR_Posicion', 'Motor Posicion']),
+  ], ' - ');
 
   return {
     brand: 'portones',
-    topCode: clean(index),
-    orderCode: `NV ${nv}`,
-    colorPiernas: '',
-    revestimiento: firstNonEmpty(descripcion, producto),
-    liston: producto,
-    puerta: '',
-    lucera: '',
-    accionamiento: '',
-    tarea: 'REMITO',
-    direccion: firstNonEmpty(pick(remito, ['dirent', 'direccion', 'Dirección']), pick(venta, ['dirent', 'direccion', 'Dirección'])),
-    localidad: firstNonEmpty(pick(remito, ['localidad']), pick(venta, ['localidad'])),
-    cliente: firstNonEmpty(pick(remito, ['nombre']), pick(venta, ['nombre'])),
-    referencia: firstNonEmpty(descripcion, producto),
-    fecha: firstNonEmpty(pick(remito, ['fecha', 'cfecha']), pick(venta, ['fecha', 'cfecha'])),
-    comercializa: firstNonEmpty(pick(remito, ['vendedor']), pick(venta, ['vendedor'])),
+    topCode: clean(partida) ? `P ${partida}` : `#${index}`,
+    orderCode: clean(partida) ? `N°${partida}` : `NV ${nv}`,
+    colorPiernas: firstNonEmpty(pick(row, ['Color_Sistema', 'Color Sistema']), pick(row, ['Color'])),
+    revestimiento: pick(row, ['Revestimiento']),
+    liston: pick(row, ['Liston', 'Listón']),
+    puerta: pick(row, ['PUERTA_Posicion', 'Puerta Posicion']),
+    lucera: pick(row, ['Lucera']),
+    accionamiento: motor,
+    tarea: firstNonEmpty(nombre, sistema, 'PORTÓN A MEDIDA'),
+    direccion: pick(row, ['Direccion', 'Dirección']),
+    localidad: '',
+    cliente: firstNonEmpty(razSoc, nombre),
+    referencia: firstNonEmpty(nombre, sistema),
+    fecha: new Date(),
+    comercializa: 'DE GRANDIS PORTONES',
     medidas,
-    numeroInterno: remitoNumero,
-    remitosPendientes: remitosLabel(remitos),
-    material: firstNonEmpty(descripcion, producto),
+    numeroInterno: firstNonEmpty(id, partida),
+    remitosPendientes: clean(partida) ? `PARTIDA\n${partida}` : `NV\n${nv}`,
+    material: firstNonEmpty(colorHoja, pick(row, ['Color'])),
     nv,
-    medidaFinal: clean(cantidad) ? `CANTIDAD: ${clean(cantidad)} ${clean(unidad)}` : medidas,
-    calculadora: firstNonEmpty(pick(remito, ['operador']), pick(venta, ['operador'])),
-    vendedor: firstNonEmpty(pick(remito, ['vendedor']), pick(venta, ['vendedor'])),
-    carpinteria: 'DE GRANDIS',
+    medidaFinal: medidas,
+    calculadora: sistema,
+    vendedor: firstNonEmpty(pick(row, ['Estado']), ''),
+    carpinteria: firstNonEmpty(colorHoja ? `COLOR HOJA\n${colorHoja}` : '', 'DE GRANDIS'),
   };
-}
-
-async function buildPortonesFallbackLabels(pool, { nv, venta, remitos }) {
-  const usableRemitos = (Array.isArray(remitos) ? remitos : []).filter((r) => !r?.anulado);
-  if (!usableRemitos.length) {
-    return { error: 'La NV ingresada no tiene remito aún.' };
-  }
-
-  const labels = [];
-  for (const remito of usableRemitos) {
-    const items = await fetchPortonesItemsForRemito(pool, remito);
-    const rows = items.length ? items : [{}];
-    for (const row of rows) {
-      labels.push(toPortonFallbackLabel(row, venta, remito, usableRemitos, nv, labels.length + 1));
-    }
-  }
-
-  return { labels };
 }
 
 function toIpanelLabel(row, venta, header, remito, nv, index) {
@@ -543,7 +373,7 @@ function toIpanelLabel(row, venta, header, remito, nv, index) {
     localidad: firstNonEmpty(pick(header, ['localidad']), pick(venta, ['localidad'])),
     cliente: firstNonEmpty(pick(header, ['nombre']), pick(venta, ['nombre'])),
     referencia: firstNonEmpty(descripcion, producto),
-    fecha: firstNonEmpty(pick(header, ['fecha', 'cfecha']), pick(venta, ['fecha', 'cfecha'])),
+    fecha: new Date(),
     comercializa: firstNonEmpty(pick(header, ['vendedor']), pick(venta, ['vendedor'])),
     medidas,
     numeroInterno: remitoNumero,
@@ -558,18 +388,15 @@ function toIpanelLabel(row, venta, header, remito, nv, index) {
 }
 
 async function buildPortonesLabels(pool, nv) {
-  const venta = await fetchVentaByNv(pool, nv);
-  const factura = await fetchFacturaByNv(pool, nv);
-  const remitos = await fetchRemitosByFactura(pool, factura);
-  const portones = await fetchPortonesByNv(pool, nv);
+  const rows = await fetchPreProduccionPortonesByNv(pool, nv);
 
-  if (portones.length) {
-    return { labels: portones.map((row, idx) => toPortonLabel(row, venta, remitos, nv, idx + 1)) };
+  if (!rows.length) {
+    return { error: 'No se encontró información en WebApp.dbo.Pre_Produccion para esa NV.' };
   }
 
-  // Algunas NV antiguas tienen remito/factura, pero no tienen registro en Pre_Produccion.
-  // En ese caso igualmente generamos la etiqueta con datos del remito y sus ítems.
-  return buildPortonesFallbackLabels(pool, { nv, venta, remitos });
+  return {
+    labels: rows.map((row, idx) => toPortonPreProduccionLabel(row, nv, idx + 1)),
+  };
 }
 
 async function buildIpanelLabels(pool, nv) {

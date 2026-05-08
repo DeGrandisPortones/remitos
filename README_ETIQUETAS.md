@@ -1,72 +1,72 @@
-# Cambios: etiquetas por NV para Portones e Ipanels
+# Etiquetas por NV
 
-Este parche agrega una salida de etiquetas para impresora Brother usando el mismo servidor de Remitos.
-
-## Backend
-
-Nuevo endpoint genérico:
-
-```http
-GET /api/etiquetas/by-nv?nv=100414&empresa=portones
-GET /api/etiquetas/by-nv?nv=100414&empresa=ipanel
-```
-
-También quedan disponibles estos aliases:
-
-```http
-GET /api/etiquetas/portones/by-nv?nv=100414
-GET /api/etiquetas/ipanel/by-nv?nv=100414
-```
-
-Devuelve un PDF listo para imprimir, con una página por cada etiqueta encontrada para esa NV.
+Este patch corrige la generación de etiquetas para Portones para que ya no dependa del remito.
 
 ## Portones
 
-La información se busca en:
+El endpoint de etiquetas consulta directamente:
 
-- `WebApp.dbo.Pre_Produccion` por `NV`
-- `dbo.NTASVTAS` / `Portones.dbo.NTASVTAS` para datos de cliente, dirección y fecha
-- `dbo.REMITOS` + `dbo.IREMITOS` para indicar remitos encontrados o pendientes
+```sql
+[WebApp].[dbo].[Pre_Produccion]
+```
+
+por el campo `NV`.
+
+Campos usados en la etiqueta:
+
+- `NV`
+- `PARTIDA`
+- `Nombre`
+- `Direccion`
+- `RazSoc`
+- `Sistema`
+- `Ancho`
+- `Alto`
+- `Revestimiento`
+- `Lucera`
+- `Color`
+- `Liston`
+- `Color_Sistema`
+- `Color_Hoja`
+- `PUERTA_Posicion`
+- `MOTOR_Condicion`
+- `MOTOR_Posicion`
+- `Estado`
+
+La fecha impresa en la etiqueta es la fecha actual, es decir, la fecha en que se genera/imprime la etiqueta.
+
+Endpoint principal:
+
+```txt
+/api/etiquetas/portones/by-nv?nv=4005&empresa=portones
+```
+
+También funciona el endpoint genérico:
+
+```txt
+/api/etiquetas/by-nv?nv=4005&empresa=portones
+```
 
 ## Ipanels
 
-La información se busca en la base `Paneles`:
+Se mantiene la lógica anterior para Ipanels, con el logo de Ipanels incluido en:
 
-- `dbo.NTASVTAS` por `numero = NV`, tomando el campo `remito`
-- `dbo.REMITOS` por número de remito para cliente, dirección, localidad, vendedor y fecha
-- `dbo.IREMITOS` con `PRODUCTOS` / `ARTICULOS` para generar una etiqueta por ítem
-
-La etiqueta de Ipanels usa el logo enviado, incluido en:
-
-```text
+```txt
 server/src/assets/ipanel.png
 ```
 
-## Frontend
+Endpoint:
 
-En modo `NV`, se agrega el botón `Etiqueta` junto a `Buscar`.
-El usuario elige empresa desde los logos existentes, ingresa la NV y abre el PDF de etiquetas en una pestaña nueva.
+```txt
+/api/etiquetas/ipanel/by-nv?nv=100414&empresa=ipanel
+```
 
 ## Archivos incluidos
 
-- `server/src/assets/ipanel.png`
-- `server/src/labelPdf.js`
-- `server/src/labelRoutes.js`
-- `server/src/index.js`
-- `client/src/api.js`
-- `client/src/App.jsx`
+- `server/src/labelRoutes.js`: reemplazar este archivo completo.
+- `server/src/labelPdf.js`: generador PDF de etiquetas.
+- `server/src/index.js`: monta rutas de etiquetas si aún no estaban montadas.
+- `server/src/assets/ipanel.png`: logo Ipanels para PDF.
+- `client/src/api.js`: helpers del frontend para abrir etiquetas.
 
-## Nota
-
-El archivo `.lbx` enviado se usó como referencia de medidas y distribución. Este parche genera PDF imprimible para Brother QL-800, no un `.lbx` editable de P-touch Editor.
-
-## Fallback para NV antiguas
-
-Si una NV de Portones no tiene fila en `Pre_Produccion`, pero sí tiene factura/remito, el endpoint ya no devuelve error. En ese caso genera las etiquetas usando:
-
-- `NTASVTAS.factura`
-- `IREMITOS.facnro`
-- `REMITOS`
-- ítems de `IREMITOS` con descripción desde `PRODUCTOS` / `ARTICULOS` cuando exista
-
-Esto cubre casos como NV viejas donde `Buscar` encuentra el remito, pero no existe información completa de portón en `Pre_Produccion`.
+No se incluye `client/src/App.jsx` porque la app que ya tenés desplegada ya muestra el botón `Etiqueta`.
