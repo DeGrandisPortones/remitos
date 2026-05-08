@@ -46,11 +46,32 @@ function resolveEmpresa(req, forcedEmpresa) {
   return 'portones';
 }
 
-function joinParts(parts, sep = ' ') {
-  return parts.map(clean).filter(Boolean).join(sep);
+function prop(row, names) {
+  const value = pick(row, names);
+  const s = clean(value);
+  if (!s || s.toLowerCase() === 'null') return 'NO';
+  return s;
 }
 
-function formatDimension(v) {
+function formatDimensionMm(v) {
+  const s = clean(v);
+  if (!s || s.toLowerCase() === 'null' || s === 'NO') return 'NO';
+
+  const normalized = String(s)
+    .replace(/\s*mm\s*$/i, '')
+    .replace(',', '.')
+    .trim();
+  const n = Number(normalized);
+
+  if (!Number.isFinite(n)) return s;
+
+  // SQL Pre_Produccion guarda Ancho/Alto en metros (ej: 2.7000). Para etiqueta se imprime en mm.
+  // Si algun dia llega un valor ya en mm (ej: 2700), no lo volvemos a multiplicar.
+  const mm = Math.abs(n) < 100 ? n * 1000 : n;
+  return String(Math.round(mm));
+}
+
+function formatDimensionLegacy(v) {
   const s = clean(v);
   if (!s) return '';
   const n = Number(String(s).replace(',', '.'));
@@ -67,10 +88,18 @@ function formatMedidas(row) {
 
   const ancho = pick(row, ['Ancho', 'ANCHO', 'ancho', 'ANCHO_MM', 'ancho_mm']);
   const alto = pick(row, ['Alto', 'ALTO', 'alto', 'ALTO_MM', 'alto_mm']);
-  const a = formatDimension(ancho);
-  const h = formatDimension(alto);
+  const a = formatDimensionLegacy(ancho);
+  const h = formatDimensionLegacy(alto);
   if (a && h) return `${a} x ${h}`;
   return a || h || '';
+}
+
+function formatMedidasMm(row) {
+  const ancho = pick(row, ['Ancho', 'ANCHO', 'ancho']);
+  const alto = pick(row, ['Alto', 'ALTO', 'alto']);
+  const a = formatDimensionMm(ancho);
+  const h = formatDimensionMm(alto);
+  return `${a} X ${h} mm`;
 }
 
 async function tryQuery(pool, attempts, inputs = {}) {
@@ -342,13 +371,6 @@ function panelRemitoLabel(header, remito) {
   return `REMITO ${clean(suc)}-${clean(nro)}`;
 }
 
-function prop(row, names) {
-  const value = pick(row, names);
-  const s = clean(value);
-  if (!s || s.toLowerCase() === 'null') return 'NO';
-  return s;
-}
-
 function shortMotorCondicion(value) {
   const s = prop({ value }, ['value']);
   const normalized = s
@@ -386,9 +408,7 @@ function splitAddress(value) {
 }
 
 function toPortonPreProduccionLabel(row, nv, index) {
-  const ancho = prop(row, ['Ancho', 'ANCHO', 'ancho']);
-  const alto = prop(row, ['Alto', 'ALTO', 'alto']);
-  const medidas = `${formatDimension(ancho) || 'NO'} X ${formatDimension(alto) || 'NO'}`;
+  const medidas = formatMedidasMm(row);
   const direccion = prop(row, ['Direccion', 'Dirección', 'DIRECCION']);
   const direccionParts = splitAddress(direccion);
   const motorCondicion = shortMotorCondicion(pick(row, ['MOTOR_Condicion', 'Motor Condicion', 'MOTOR CONDICION']));
@@ -398,21 +418,18 @@ function toPortonPreProduccionLabel(row, nv, index) {
   return {
     brand: 'portones',
     topCode: `NV ${nv}`,
-    // En la plantilla, este campo se muestra como "N° XXXX" y corresponde a la NV.
-    orderCode: `N° ${nv}`,
+    orderCode: `N\u00b0 ${nv}`,
     colorPiernas: prop(row, ['Color_Sistema', 'Color Sistema', 'COLOR_SISTEMA']),
     revestimiento: prop(row, ['Color_Hoja', 'Color Hoja', 'COLOR_HOJA']),
     liston: prop(row, ['Liston', 'Listón', 'LISTON']),
     puerta: prop(row, ['PUERTA_Posicion', 'Puerta Posicion', 'PUERTA POSICION']),
     lucera: prop(row, ['Lucera', 'LUCERA']),
     accionamiento: accionamiento || 'NO',
-    // El bloque grande que antes decía INSTALACIÓN ahora muestra el Tipo_Embalaje.
     tarea: prop(row, ['Tipo_Embalaje', 'Tipo Embalaje', 'TIPO_EMBALAJE']),
     direccion: direccionParts.line1,
     direccion2: direccionParts.line2,
     cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
     referencia: '',
-    // El usuario pidió fecha de impresión, no Fecha_NV.
     fecha: new Date(),
     comercializa: prop(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social']),
     medidas,
@@ -426,7 +443,6 @@ function toPortonPreProduccionLabel(row, nv, index) {
     carpinteria: '',
   };
 }
-
 
 function toIpanelLabel(row, venta, header, remito, nv, index) {
   const producto = pick(row, ['producto', 'Producto', 'codigo', 'Código', 'codart']);
@@ -469,7 +485,7 @@ async function buildPortonesLabels(pool, nv) {
   const rows = await fetchPreProduccionPortonesByNv(pool, nv);
 
   if (!rows.length) {
-    return { error: 'No se encontró información en WebApp.dbo.Pre_Produccion para esa NV.' };
+    return { error: 'No se encontro informacion en WebApp.dbo.Pre_Produccion para esa NV.' };
   }
 
   return {
@@ -480,7 +496,7 @@ async function buildPortonesLabels(pool, nv) {
 async function buildIpanelLabels(pool, nv) {
   const venta = await fetchVentaByNv(pool, nv);
   const remito = await fetchPanelesRemitoByNv(pool, nv);
-  if (!remito) return { error: 'La NV ingresada no tiene remito aún.' };
+  if (!remito) return { error: 'La NV ingresada no tiene remito aun.' };
 
   const header = await fetchPanelesRemitoHeader(pool, remito);
   const items = await fetchPanelesItems(pool, remito, header);
@@ -489,31 +505,65 @@ async function buildIpanelLabels(pool, nv) {
   return { labels: rows.map((row, idx) => toIpanelLabel(row, venta, header, remito, nv, idx + 1)) };
 }
 
-async function handleLabelsByNv(req, res, forcedEmpresa) {
+async function buildLabelsForRequest(req, forcedEmpresa) {
   const nv = parseIntSafe(req.query.nv ?? req.query.numero);
   if (nv === null) {
-    return res.status(400).json({ error: 'Query param "nv" must be a number.' });
+    return { status: 400, error: 'Query param "nv" must be a number.' };
   }
 
   const empresa = resolveEmpresa(req, forcedEmpresa);
-  // Portones: la etiqueta sale de WebApp.dbo.Pre_Produccion.
-  // Ipanels: se mantiene la lectura desde Paneles/remitos.
   const dbName = empresa === 'ipanel' ? 'Paneles' : 'WebApp';
+  const pool = await getPool(dbName);
+  const result = empresa === 'ipanel'
+    ? await buildIpanelLabels(pool, nv)
+    : await buildPortonesLabels(pool, nv);
 
+  if (result.error) return { status: 404, error: result.error };
+  return { status: 200, empresa, nv, labels: result.labels };
+}
+
+function normalizeClientLabel(label) {
+  const out = { ...(label || {}) };
+  out.brand = clean(out.brand) || 'portones';
+  out.orderCode = clean(out.orderCode);
+  out.colorPiernas = clean(out.colorPiernas);
+  out.revestimiento = clean(out.revestimiento);
+  out.liston = clean(out.liston);
+  out.puerta = clean(out.puerta);
+  out.lucera = clean(out.lucera);
+  out.accionamiento = clean(out.accionamiento);
+  out.tarea = clean(out.tarea);
+  out.direccion = clean(out.direccion);
+  out.direccion2 = clean(out.direccion2);
+  out.localidad = clean(out.localidad);
+  out.cliente = clean(out.cliente);
+  out.referencia = clean(out.referencia);
+  out.fecha = clean(out.fecha) || new Date().toISOString();
+  out.comercializa = clean(out.comercializa);
+  out.medidas = clean(out.medidas);
+  return out;
+}
+
+async function handleLabelsDataByNv(req, res, forcedEmpresa) {
   try {
-    const pool = await getPool(dbName);
-    const result = empresa === 'ipanel'
-      ? await buildIpanelLabels(pool, nv)
-      : await buildPortonesLabels(pool, nv);
+    const result = await buildLabelsForRequest(req, forcedEmpresa);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    return res.json({ empresa: result.empresa, nv: result.nv, labels: result.labels });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Label data error', detail: String(err.message || err) });
+  }
+}
 
-    if (result.error) {
-      return res.status(404).json({ error: result.error });
-    }
+async function handleLabelsByNv(req, res, forcedEmpresa) {
+  try {
+    const result = await buildLabelsForRequest(req, forcedEmpresa);
+    if (result.error) return res.status(result.status).json({ error: result.error });
 
     const pdfBuffer = await buildPortonLabelsPdf(result.labels);
-    const filename = empresa === 'ipanel'
-      ? `etiquetas-ipanel-nv-${nv}.pdf`
-      : `etiquetas-portones-nv-${nv}.pdf`;
+    const filename = result.empresa === 'ipanel'
+      ? `etiquetas-ipanel-nv-${result.nv}.pdf`
+      : `etiquetas-portones-nv-${result.nv}.pdf`;
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
@@ -524,6 +574,31 @@ async function handleLabelsByNv(req, res, forcedEmpresa) {
   }
 }
 
+async function handleEditedLabelsPdf(req, res) {
+  try {
+    const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
+    if (!labelsIn.length) {
+      return res.status(400).json({ error: 'Body must include labels array.' });
+    }
+
+    const labels = labelsIn.map(normalizeClientLabel);
+    const firstNv = clean(req.body?.nv || labels[0]?.nv || labels[0]?.topCode || 'editadas').replace(/[^a-zA-Z0-9_-]/g, '');
+    const pdfBuffer = await buildPortonLabelsPdf(labels);
+    const filename = `etiquetas-editadas-${firstNv || 'nv'}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Edited label generation error', detail: String(err.message || err) });
+  }
+}
+
+router.get('/etiquetas/by-nv/data', (req, res) => handleLabelsDataByNv(req, res));
+router.get('/etiquetas/portones/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'portones'));
+router.get('/etiquetas/ipanel/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'ipanel'));
+router.post('/etiquetas/pdf', handleEditedLabelsPdf);
 router.get('/etiquetas/by-nv', (req, res) => handleLabelsByNv(req, res));
 router.get('/etiquetas/portones/by-nv', (req, res) => handleLabelsByNv(req, res, 'portones'));
 router.get('/etiquetas/ipanel/by-nv', (req, res) => handleLabelsByNv(req, res, 'ipanel'));

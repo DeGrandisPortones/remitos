@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  fetchLabelDataForNv,
   generateCustomRemitoPdf,
-  generateLabelPdfForNv,
+  generateLabelPdfFromLabels,
   pdfUrlForRemito,
   pingServer,
   searchRemitosByNumero,
@@ -12,6 +13,42 @@ import {
 const WARMUP_EMPRESA = 'portones';
 const WARMUP_NV = 4000;
 const STATUS_REFRESH_MS = 60000;
+
+const PORTONES_LABEL_FIELDS = [
+  { key: 'orderCode', label: 'Numero' },
+  { key: 'colorPiernas', label: 'Color piernas' },
+  { key: 'revestimiento', label: 'Revestimiento' },
+  { key: 'liston', label: 'Liston' },
+  { key: 'puerta', label: 'Puerta' },
+  { key: 'lucera', label: 'Lucera' },
+  { key: 'accionamiento', label: 'Accionamiento' },
+  { key: 'tarea', label: 'Instalacion / Embalaje' },
+  { key: 'direccion', label: 'Direccion linea 1' },
+  { key: 'direccion2', label: 'Direccion linea 2' },
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'fecha', label: 'Fecha', type: 'date' },
+  { key: 'comercializa', label: 'Comercializa' },
+  { key: 'medidas', label: 'Medidas' },
+];
+
+const IPANEL_LABEL_FIELDS = [
+  { key: 'topCode', label: 'NV' },
+  { key: 'orderCode', label: 'Codigo / item' },
+  { key: 'producto', label: 'Producto' },
+  { key: 'revestimiento', label: 'Detalle' },
+  { key: 'cantidad', label: 'Cantidad' },
+  { key: 'unidad', label: 'Unidad' },
+  { key: 'observacionItem', label: 'Observacion item' },
+  { key: 'estado', label: 'Estado' },
+  { key: 'tarea', label: 'Titulo' },
+  { key: 'direccion', label: 'Direccion' },
+  { key: 'localidad', label: 'Localidad' },
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'referencia', label: 'Referencia' },
+  { key: 'fecha', label: 'Fecha', type: 'date' },
+  { key: 'comercializa', label: 'Comercializa' },
+  { key: 'medidas', label: 'Medidas' },
+];
 
 function fmtDate(v) {
   if (!v) return '';
@@ -32,10 +69,23 @@ function todayIsoDate() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function normalizeDateInput(v) {
+  if (!v) return todayIsoDate();
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) {
+    const s = String(v).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : todayIsoDate();
+  }
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function statusLabel(serverStatus) {
   if (serverStatus === 'online') return 'Online';
   if (serverStatus === 'offline') return 'Offline';
-  return 'Conectando…';
+  return 'Conectando...';
 }
 
 function statusTone(serverStatus) {
@@ -44,15 +94,23 @@ function statusTone(serverStatus) {
   return 'warn';
 }
 
+function labelFieldsFor(label) {
+  return label?.brand === 'ipanel' ? IPANEL_LABEL_FIELDS : PORTONES_LABEL_FIELDS;
+}
+
 export default function App() {
   const [numero, setNumero] = useState('');
   const [mode, setMode] = useState('nv'); // remito | nv | custom
   const [empresa, setEmpresa] = useState('portones'); // portones | ipanel
   const [loading, setLoading] = useState(false);
+  const [labelLoading, setLabelLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
   const [logoShake, setLogoShake] = useState(null); // 'portones' | 'ipanel' | null
   const [serverStatus, setServerStatus] = useState('checking'); // checking | online | offline
+  const [labelModalOpen, setLabelModalOpen] = useState(false);
+  const [labelModalNv, setLabelModalNv] = useState('');
+  const [labelModalLabels, setLabelModalLabels] = useState([]);
 
   const [customHeader, setCustomHeader] = useState(() => ({
     tipo: 'RR',
@@ -132,7 +190,7 @@ export default function App() {
 
     const n = Number(numero);
     if (!Number.isFinite(n)) {
-      setError('Ingresá un número válido.');
+      setError('Ingresa un numero valido.');
       return;
     }
 
@@ -145,16 +203,16 @@ export default function App() {
       setResults(data.items || []);
       if (!data.items || data.items.length === 0) {
         if (mode === 'nv') {
-          window.alert('La NV ingresada no tiene remito aún.');
+          window.alert('La NV ingresada no tiene remito aun.');
           setError('');
         } else {
-          setError('No se encontraron remitos con ese número.');
+          setError('No se encontraron remitos con ese numero.');
         }
       }
     } catch (err) {
       const msg = err?.message || 'Error';
       if (mode === 'nv' && String(msg).toLowerCase().includes('no tiene remito')) {
-        window.alert('La NV ingresada no tiene remito aún.');
+        window.alert('La NV ingresada no tiene remito aun.');
         setError('');
       } else {
         setError(msg);
@@ -166,7 +224,6 @@ export default function App() {
 
   function openPdf(r) {
     let url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa });
-    // Para Paneles, si venimos de búsqueda por NV, mandamos nv para que el server imprima la observación correcta.
     if (mode === 'nv' && String(numero).trim() !== '') {
       const sep = url.includes('?') ? '&' : '?';
       url = `${url}${sep}nv=${encodeURIComponent(String(numero).trim())}`;
@@ -180,25 +237,65 @@ export default function App() {
 
     const n = Number(numero);
     if (!Number.isFinite(n)) {
-      setError('Ingresá un número de NV válido.');
+      setError('Ingresa un numero de NV valido.');
       return;
     }
 
     try {
-      setLoading(true);
-      const blob = await generateLabelPdfForNv({ nv: Math.trunc(n), empresa });
+      setLabelLoading(true);
+      const data = await fetchLabelDataForNv({ nv: Math.trunc(n), empresa });
+      const labels = (data.labels || []).map((label) => ({
+        ...label,
+        fecha: normalizeDateInput(label.fecha),
+      }));
+
+      if (!labels.length) {
+        setError('No se encontraron datos para generar la etiqueta.');
+        return;
+      }
+
+      setLabelModalNv(String(Math.trunc(n)));
+      setLabelModalLabels(labels);
+      setLabelModalOpen(true);
+    } catch (err) {
+      setError(err?.message || 'Error al preparar etiqueta');
+    } finally {
+      setLabelLoading(false);
+    }
+  }
+
+  function updateLabelField(labelIndex, key, value) {
+    setLabelModalLabels((prev) => prev.map((label, idx) => (
+      idx === labelIndex ? { ...label, [key]: value } : label
+    )));
+  }
+
+  function closeLabelModal() {
+    if (labelLoading) return;
+    setLabelModalOpen(false);
+    setLabelModalLabels([]);
+    setLabelModalNv('');
+  }
+
+  async function generateEditedLabels() {
+    if (!labelModalLabels.length) return;
+
+    try {
+      setLabelLoading(true);
+      setError('');
+      const blob = await generateLabelPdfFromLabels({
+        labels: labelModalLabels,
+        nv: labelModalNv,
+        empresa,
+      });
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      closeLabelModal();
     } catch (err) {
-      const msg = err?.message || 'Error al generar etiqueta';
-      if (String(msg).toLowerCase().includes('no tiene remito')) {
-        window.alert('La NV ingresada no tiene remito aún.');
-      } else {
-        setError(msg);
-      }
+      setError(err?.message || 'Error al generar etiqueta');
     } finally {
-      setLoading(false);
+      setLabelLoading(false);
     }
   }
 
@@ -271,15 +368,15 @@ export default function App() {
       .filter((it) => it.producto || it.descripcion);
 
     if (!header.tipo || !header.sucursal || !header.numero) {
-      window.alert('Completá Tipo, Sucursal y Número de remito.');
+      window.alert('Completa Tipo, Sucursal y Numero de remito.');
       return;
     }
     if (!header.nombre || String(header.nombre).trim() === '') {
-      window.alert('Completá el nombre del cliente.');
+      window.alert('Completa el nombre del cliente.');
       return;
     }
     if (items.length === 0) {
-      window.alert('Agregá al menos 1 ítem.');
+      window.alert('Agrega al menos 1 item.');
       return;
     }
 
@@ -374,7 +471,7 @@ export default function App() {
         {mode !== 'custom' ? (
           <>
             <label className="label">
-              {mode === 'nv' ? 'Número de NV' : 'Número de remito'}
+              {mode === 'nv' ? 'Numero de NV' : 'Numero de remito'}
               <input
                 className="input"
                 value={numero}
@@ -385,11 +482,11 @@ export default function App() {
             </label>
             <div className="row">
               <button className="btn" disabled={!canSearch || loading} type="submit">
-                {loading ? 'Buscando…' : 'Buscar'}
+                {loading ? 'Buscando...' : 'Buscar'}
               </button>
               {mode === 'nv' ? (
-                <button className="btn btn-secondary" disabled={!canSearch || loading} type="button" onClick={openLabelsForNv}>
-                  Etiqueta
+                <button className="btn btn-secondary" disabled={!canSearch || labelLoading} type="button" onClick={openLabelsForNv}>
+                  {labelLoading ? 'Cargando...' : 'Etiqueta'}
                 </button>
               ) : null}
               <button
@@ -425,7 +522,7 @@ export default function App() {
                     />
                   </label>
                   <label className="label">
-                    Número
+                    Numero
                     <input
                       className="input"
                       type="number"
@@ -467,7 +564,7 @@ export default function App() {
                 <div className="section-title">Cliente</div>
                 <div className="grid2">
                   <label className="label">
-                    Código
+                    Codigo
                     <input className="input" value={customHeader.cliente} onChange={(e) => updateCustomField('cliente', e.target.value)} />
                   </label>
                   <label className="label">
@@ -475,7 +572,7 @@ export default function App() {
                     <input className="input" value={customHeader.nombre} onChange={(e) => updateCustomField('nombre', e.target.value)} />
                   </label>
                   <label className="label grid-span-2">
-                    Dirección
+                    Direccion
                     <input className="input" value={customHeader.direccion} onChange={(e) => updateCustomField('direccion', e.target.value)} />
                   </label>
                   <label className="label">
@@ -510,7 +607,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="section-title">Ítems</div>
+            <div className="section-title">Items</div>
             <div className="items">
               {customItems.map((it, idx) => (
                 <div className="item-row" key={idx}>
@@ -530,7 +627,7 @@ export default function App() {
                   />
                   <input
                     className="input item-desc"
-                    placeholder="Descripción"
+                    placeholder="Descripcion"
                     value={it.descripcion}
                     onChange={(e) => updateCustomItem(idx, 'descripcion', e.target.value)}
                   />
@@ -547,20 +644,20 @@ export default function App() {
               ))}
               <div className="items-actions">
                 <button type="button" className="btn btn-secondary" onClick={addCustomItem}>
-                  + Agregar ítem
+                  + Agregar item
                 </button>
               </div>
             </div>
 
             <div className="section-title">Texto inferior</div>
             <label className="label">
-              Observación (se imprime abajo)
+              Observacion (se imprime abajo)
               <input className="input" value={customHeader.observ} onChange={(e) => updateCustomField('observ', e.target.value)} />
             </label>
 
             <div className="row">
               <button className="btn" type="button" onClick={onGenerateCustomPdf} disabled={loading}>
-                {loading ? 'Generando…' : 'Generar PDF'}
+                {loading ? 'Generando...' : 'Generar PDF'}
               </button>
               <button className="btn btn-secondary" type="button" onClick={resetCustom} disabled={loading}>
                 Limpiar
@@ -571,6 +668,50 @@ export default function App() {
 
         {error ? <div className="error">{error}</div> : null}
       </form>
+
+      {labelModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <div className="modal-header">
+              <div>
+                <div className="modal-title">Editar etiqueta NV {labelModalNv}</div>
+                <div className="modal-subtitle">Revisa y ajusta los datos antes de generar el PDF.</div>
+              </div>
+              <button className="modal-close" type="button" onClick={closeLabelModal} disabled={labelLoading}>x</button>
+            </div>
+
+            <div className="modal-body">
+              {labelModalLabels.map((label, labelIndex) => (
+                <div className="label-edit-card" key={`${label.nv || labelModalNv}-${labelIndex}`}>
+                  <div className="label-edit-title">Etiqueta {labelIndex + 1}</div>
+                  <div className="label-edit-grid">
+                    {labelFieldsFor(label).map((field) => (
+                      <label className="label label-edit-field" key={field.key}>
+                        {field.label}
+                        <input
+                          className="input"
+                          type={field.type || 'text'}
+                          value={label[field.key] ?? ''}
+                          onChange={(e) => updateLabelField(labelIndex, field.key, e.target.value)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={closeLabelModal} disabled={labelLoading}>
+                Cancelar
+              </button>
+              <button className="btn" type="button" onClick={generateEditedLabels} disabled={labelLoading || labelModalLabels.length === 0}>
+                {labelLoading ? 'Generando...' : 'Generar etiqueta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {results.length > 0 && (
         <section className="card">
@@ -596,7 +737,7 @@ export default function App() {
                 <div>{r.sucursal}</div>
                 <div>{r.numero}</div>
                 <div className="muted">
-                  <div><b>{r.cliente}</b> — {r.nombre}</div>
+                  <div><b>{r.cliente}</b> - {r.nombre}</div>
                   <div className="small">{r.localidad} ({r.provincia})</div>
                 </div>
                 <div>
@@ -613,7 +754,7 @@ export default function App() {
           </div>
 
           <div className="hint">
-            Tip: el PDF se abre en una pestaña nueva. Desde ahí podés imprimir.
+            Tip: el PDF se abre en una pestana nueva. Desde ahi podes imprimir.
           </div>
         </section>
       )}

@@ -39,7 +39,6 @@
 }
 
 .logo {
-  /* 3x del tamaño anterior (52px → 156px) */
   width: 156px;
   height: 156px;
   border-radius: 28px;
@@ -162,6 +161,7 @@
   display: flex;
   gap: 10px;
   margin-top: 12px;
+  flex-wrap: wrap;
 }
 
 .btn {
@@ -253,7 +253,6 @@
 .btn:hover { filter: brightness(0.95); }
 .btn-secondary:hover { filter: brightness(0.98); }
 
-/* Custom remito */
 .custom {
   margin-top: 12px;
 }
@@ -301,7 +300,99 @@
   justify-content: flex-start;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(17, 24, 39, .58);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal-card {
+  width: min(920px, 100%);
+  max-height: min(88vh, 860px);
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #e6e8ee;
+  box-shadow: 0 22px 60px rgba(0,0,0,.24);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid #eef0f5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.modal-subtitle {
+  margin-top: 4px;
+  color: #555;
+  font-size: 13px;
+}
+
+.modal-close {
+  border: 0;
+  background: #e9ecf3;
+  border-radius: 999px;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.modal-body {
+  padding: 16px 18px;
+  overflow: auto;
+}
+
+.label-edit-card {
+  border: 1px solid #e6e8ee;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+  background: #fbfcff;
+}
+
+.label-edit-title {
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.label-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.label-edit-field {
+  font-size: 13px;
+}
+
+.modal-actions {
+  padding: 14px 18px;
+  border-top: 1px solid #eef0f5;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 @media (max-width: 860px) {
   .custom-grid { grid-template-columns: 1fr; }
   .item-row { grid-template-columns: 1fr; }
+  .label-edit-grid { grid-template-columns: 1fr; }
+  .modal-card { max-height: 92vh; }
 }

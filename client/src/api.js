@@ -27,6 +27,22 @@ async function httpJson(url, options) {
   return data;
 }
 
+async function httpBlob(url, options) {
+  const r = await fetch(url, options);
+  if (!r.ok) {
+    const text = await r.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+    const msg = data?.error || `HTTP ${r.status}`;
+    throw new Error(msg);
+  }
+  return r.blob();
+}
+
 export async function pingServer(empresa) {
   const base = `${API_BASE}/api/health`;
   const url = withEmpresa(base, empresa);
@@ -67,23 +83,29 @@ export function labelPdfUrlForNv({ nv, empresa }) {
   return withEmpresa(base, empresa);
 }
 
+export function labelDataUrlForNv({ nv, empresa }) {
+  const base = `${API_BASE}/api/etiquetas/by-nv/data?nv=${encodeURIComponent(nv)}`;
+  return withEmpresa(base, empresa);
+}
+
+export async function fetchLabelDataForNv({ nv, empresa }) {
+  const url = labelDataUrlForNv({ nv, empresa });
+  return httpJson(url);
+}
+
 export async function generateLabelPdfForNv({ nv, empresa }) {
   const url = labelPdfUrlForNv({ nv, empresa });
-  const r = await fetch(url);
+  return httpBlob(url);
+}
 
-  if (!r.ok) {
-    const text = await r.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
-    const msg = data?.error || `HTTP ${r.status}`;
-    throw new Error(msg);
-  }
-
-  return r.blob();
+export async function generateLabelPdfFromLabels({ labels, nv, empresa }) {
+  const base = `${API_BASE}/api/etiquetas/pdf`;
+  const url = withEmpresa(base, empresa);
+  return httpBlob(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels, nv, empresa }),
+  });
 }
 
 export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
@@ -94,23 +116,9 @@ export function jsonUrlForRemito({ tipo, sucursal, numero, empresa }) {
 export async function generateCustomRemitoPdf({ empresa, header, items }) {
   const base = `${API_BASE}/api/remitos/custom/pdf`;
   const url = withEmpresa(base, empresa);
-  const r = await fetch(url, {
+  return httpBlob(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ header, items }),
   });
-
-  if (!r.ok) {
-    const text = await r.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
-    }
-    const msg = data?.error || `HTTP ${r.status}`;
-    throw new Error(msg);
-  }
-
-  return r.blob();
 }
