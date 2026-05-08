@@ -124,6 +124,24 @@ function escapeXml(v) {
     .replace(/'/g, '&apos;');
 }
 
+
+function textCharLen(value) {
+  return Array.from(String(value ?? '')).length;
+}
+
+function resetStringItems(fragment, plainText) {
+  const firstFontInfo = fragment.match(/<text:ptFontInfo>[\s\S]*?<\/text:ptFontInfo>/)?.[0] || '';
+  if (!firstFontInfo) return fragment;
+  const item = `<text:stringItem charLen="${textCharLen(plainText)}">${firstFontInfo}</text:stringItem>`;
+  return fragment.replace(/(<pt:data>[\s\S]*?<\/pt:data>)(?:<text:stringItem[\s\S]*?<\/text:stringItem>)+/, `$1${item}`);
+}
+
+function setTextAlign(fragment, horizontal = 'LEFT', vertical = null) {
+  let out = fragment.replace(/horizontalAlignment="[^"]+"/, `horizontalAlignment="${horizontal}"`);
+  if (vertical) out = out.replace(/verticalAlignment="[^"]+"/, `verticalAlignment="${vertical}"`);
+  return out;
+}
+
 function fmtDate(v) {
   if (!v) return '';
   const d = v instanceof Date ? v : new Date(v);
@@ -186,7 +204,7 @@ function wrapValue(value, maxChars = 22, maxLines = 2) {
   return lines.length ? lines : ['NO'];
 }
 
-function pairLines(prefix, value, maxChars = 34, maxLines = 2) {
+function pairLines(prefix, value, maxChars = 30, maxLines = 2) {
   const safePrefix = clean(prefix);
   const val = clean(value) || '-NO';
   const firstMax = Math.max(8, maxChars - safePrefix.length - 1);
@@ -206,6 +224,7 @@ function replaceDataInTextObject(xml, oldValue, newValue, transform = null) {
     found = true;
     let next = fragment.replace(oldTag, `<pt:data>${escapeXml(newValue)}</pt:data>`);
     if (typeof transform === 'function') next = transform(next);
+    next = resetStringItems(next, newValue);
     return next;
   });
 
@@ -287,14 +306,22 @@ function replaceData(xml, oldValue, newValue) {
   return xml.replace(oldTag, newTag);
 }
 
-function replaceDataRaw(xml, oldValue, newValue) {
+function replaceDataRaw(xml, oldValue, newValue, plainValue = null) {
   const oldTag = `<pt:data>${oldValue}</pt:data>`;
   const newTag = `<pt:data>${newValue}</pt:data>`;
   if (!xml.includes(oldTag)) {
     console.warn('No se encontro texto LBX para reemplazar:', oldValue.slice(0, 80));
     return xml;
   }
-  return xml.replace(oldTag, newTag);
+
+  const pattern = /<text:text>[\s\S]*?<\/text:text>/g;
+  let done = false;
+  return xml.replace(pattern, (fragment) => {
+    if (done || !fragment.includes(oldTag)) return fragment;
+    done = true;
+    const next = fragment.replace(oldTag, newTag);
+    return resetStringItems(next, plainValue ?? newValue);
+  });
 }
 
 function portonesLabelToXml(label) {
@@ -317,7 +344,7 @@ function portonesLabelToXml(label) {
   ].join('\n');
 
   const medidas = medidasMmText(label);
-  const comercializa = wrapWords(upper(label.comercializa || 'NO'), 15, 3);
+  const comercializa = wrapWords(upper(label.comercializa || 'NO'), 12, 3);
 
   xml = replaceDataInTextObject(xml, 'N°3463/3309 ', label.orderCode || label.topCode || 'N°', (fragment) =>
     setTextBox(fragment, { size: '31pt', orgPoint: '31pt', shrink: 'true', autoLF: 'true' })
@@ -327,7 +354,7 @@ function portonesLabelToXml(label) {
   // Para evitar que P-touch junte todos los valores en una sola linea cuando algo es largo,
   // usamos un unico objeto de ancho completo, con un renglon por dato.
   xml = replaceDataInTextObject(xml, 'COLOR PIERNAS:\nREVESTIMIENTO:\nLISTON:\nPUERTA:\nLUCERA:\nACCIONAMIENTO:', specs, (fragment) =>
-    setTextBox(fragment, { x: '6pt', y: '171.5pt', width: '164pt', height: '75pt', size: '7.4pt', orgPoint: '7.4pt', shrink: 'true', autoLF: 'true' })
+    setTextAlign(setTextBox(fragment, { x: '7pt', y: '172pt', width: '160pt', height: '78pt', size: '7.2pt', orgPoint: '7.2pt', shrink: 'true', autoLF: 'true' }), 'LEFT', 'CENTER')
   );
   xml = replaceDataInTextObject(xml, '-NEG MICRO\n-NEG MICRO\n-NO\n-NO\n-NO\n-AUT DERECHA', ' ', (fragment) =>
     setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
@@ -344,7 +371,7 @@ function portonesLabelToXml(label) {
   // Igual que las especificaciones: datos de direccion/cliente/fecha en un solo objeto ancho.
   // Si un valor no entra, se parte por palabras y sigue abajo.
   xml = replaceDataInTextObject(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLines, (fragment) =>
-    setTextBox(fragment, { x: '8pt', y: '300.4pt', width: '160pt', height: '70pt', size: '6.9pt', orgPoint: '6.9pt', shrink: 'true', autoLF: 'true' })
+    setTextAlign(setTextBox(fragment, { x: '8pt', y: '300pt', width: '160pt', height: '70pt', size: '6.8pt', orgPoint: '6.8pt', shrink: 'true', autoLF: 'true' }), 'LEFT', 'CENTER')
   );
   xml = replaceDataInTextObject(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', ' ', (fragment) =>
     setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
@@ -354,7 +381,7 @@ function portonesLabelToXml(label) {
     const lines = comercializa.split('\n').length;
     const maxLen = Math.max(...comercializa.split('\n').map((line) => line.length));
     const size = lines > 1 ? (maxLen > 14 ? 11 : 13) : (maxLen > 15 ? 14 : 17);
-    return setTextBox(fragment, { x: '12pt', width: '151pt', height: '43pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' });
+    return setTextAlign(setTextBox(fragment, { x: '16pt', width: '143pt', height: '43pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
   });
 
   xml = replaceDataInTextObject(xml, 'MEDIDAS: 2980X2380', `MEDIDAS: ${medidas}`, (fragment) =>
@@ -418,11 +445,11 @@ function prepareSmallTextFragment(fragment) {
     .replace(/height="39\.8pt"/g, 'height="57pt"')
     .replace(/width="101\.8pt"/g, 'width="126pt"')
     .replace(/x="39\.2pt"/g, 'x="35pt"')
-    .replace(/size="24pt"/g, 'size="6.2pt"')
-    .replace(/size="11\.7pt"/g, 'size="6.2pt"')
-    .replace(/orgPoint="40pt"/g, 'orgPoint="6.2pt"')
-    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="6.2pt"');
-  out = setTextBox(out, { width: '126pt', height: '57pt', size: '6.2pt', orgPoint: '6.2pt', shrink: 'true', autoLF: 'true' });
+    .replace(/size="24pt"/g, 'size="6pt"')
+    .replace(/size="11\.7pt"/g, 'size="6pt"')
+    .replace(/orgPoint="40pt"/g, 'orgPoint="6pt"')
+    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="6pt"');
+  out = setTextAlign(setTextBox(out, { width: '130pt', height: '57pt', size: '6pt', orgPoint: '6pt', shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
   return out;
 }
 
@@ -438,7 +465,7 @@ function smallRefText(label) {
 
   // Partimos por palabras para que "ABERTURAS PH" no quede como "ABERTU".
   // Maximo 3 lineas de referencia, asi queda espacio para las medidas verticales.
-  const refLines = wrapWords(upper(ref), 15, 3).split('\n').filter(Boolean);
+  const refLines = wrapWords(upper(ref), 13, 2).split('\n').filter(Boolean);
   if (refLines.length) {
     refLines[0] = `REF: ${refLines[0]}`;
   } else {
@@ -470,7 +497,8 @@ function buildSmallPortonesLabelXml(label, copies = 4) {
     const textObj = replaceDataRaw(
       prepareSmallTextFragment(shiftObjectFragment(smallText, delta, suffix)),
       'N°4165 \nREF: CORREDIZO ',
-      escapeXmlPreserveWhitespace(textValue)
+      escapeXmlPreserveWhitespace(textValue),
+      textValue
     );
     objects.push(logo, textObj);
   }
@@ -537,7 +565,8 @@ function buildCompletePortonesLabelXml(label, smallCopies = 4) {
     const textObj = replaceDataRaw(
       prepareSmallTextFragment(shiftObjectFragment(smallText, delta, suffix)),
       'N°4165 \nREF: CORREDIZO ',
-      escapeXmlPreserveWhitespace(textValue)
+      escapeXmlPreserveWhitespace(textValue),
+      textValue
     );
     smallObjects.push(logo, textObj);
   }
