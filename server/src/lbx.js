@@ -108,6 +108,22 @@ function upper(v) {
   return clean(v).toUpperCase();
 }
 
+function removeDigitsFromText(value) {
+  const stripped = clean(value)
+    .replace(/\d+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || 'NO';
+}
+
+function nvDisplayText(label) {
+  const raw = clean(label?.nv || label?.orderCode || label?.topCode || '');
+  const match = raw.match(/\d+/);
+  if (match) return `NV ${match[0]}`;
+  if (!raw) return 'NV';
+  return raw.replace(/^N[°º]?\s*/i, 'NV ').replace(/^NV\s*/i, 'NV ');
+}
+
 function dash(v) {
   const s = clean(v);
   return s ? `-${s}` : '-NO';
@@ -360,9 +376,9 @@ function portonesLabelToXml(label) {
   ].join('\n');
 
   const medidas = medidasMmTwoLineText(label);
-  const comercializa = wrapWords(upper(label.comercializa || 'NO'), 12, 3);
+  const comercializa = wrapWords(upper(removeDigitsFromText(label.comercializa || 'NO')), 12, 3);
 
-  xml = replaceDataInTextObject(xml, 'N°3463/3309 ', label.orderCode || label.topCode || 'N°', (fragment) =>
+  xml = replaceDataInTextObject(xml, 'N°3463/3309 ', nvDisplayText(label), (fragment) =>
     setTextBox(fragment, { size: '31pt', orgPoint: '31pt', shrink: 'true', autoLF: 'true' })
   );
 
@@ -498,7 +514,7 @@ function smallRefText(label) {
     refLines.push('REF: NO');
   }
 
-  return [`N°${nv}`, ...refLines].join('\n');
+  return [`NV ${nv}`, ...refLines].join('\n');
 }
 
 function buildSmallPortonesLabelXml(label, copies = 4) {

@@ -53,6 +53,14 @@ function prop(row, names) {
   return s;
 }
 
+function removeDigitsFromText(value) {
+  const stripped = clean(value)
+    .replace(/\d+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || 'NO';
+}
+
 function formatDimensionMm(v) {
   const s = clean(v);
   if (!s || s.toLowerCase() === 'null' || s === 'NO') return 'NO';
@@ -418,7 +426,7 @@ function toPortonPreProduccionLabel(row, nv, index) {
   return {
     brand: 'portones',
     topCode: `NV ${nv}`,
-    orderCode: `N\u00b0 ${nv}`,
+    orderCode: `NV ${nv}`,
     colorPiernas: prop(row, ['Color_Sistema', 'Color Sistema', 'COLOR_SISTEMA']),
     revestimiento: prop(row, ['Color_Hoja', 'Color Hoja', 'COLOR_HOJA']),
     liston: prop(row, ['Liston', 'Listón', 'LISTON']),
@@ -431,7 +439,7 @@ function toPortonPreProduccionLabel(row, nv, index) {
     cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
     referencia: '',
     fecha: new Date(),
-    comercializa: prop(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social']),
+    comercializa: removeDigitsFromText(prop(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social'])),
     medidas,
     numeroInterno: firstNonEmpty(nv, index),
     remitosPendientes: '',
@@ -539,7 +547,7 @@ function normalizeClientLabel(label) {
   out.cliente = clean(out.cliente);
   out.referencia = clean(out.referencia);
   out.fecha = clean(out.fecha) || new Date().toISOString();
-  out.comercializa = clean(out.comercializa);
+  out.comercializa = removeDigitsFromText(out.comercializa);
   out.medidas = clean(out.medidas);
   return out;
 }
