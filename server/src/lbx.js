@@ -296,6 +296,22 @@ function medidasMmVerticalText(label) {
   return text === 'NO' ? 'NO' : text.replace(/\s+MM$/i, '');
 }
 
+function medidasMmTwoLineText(label) {
+  const { ancho, alto } = measurementPartsMm(label);
+  if (ancho && alto) return `MEDIDAS:\n${ancho}X${alto}`;
+
+  const source = clean(label?.medidas || label?.medidaFinal || '');
+  if (!source || source.toUpperCase() === 'NO') return 'MEDIDAS:\nNO';
+
+  const nums = extractMeasurementNumbers(source);
+  if (nums.length === 1) {
+    const only = normalizeDimensionTokenToMm(nums[0]);
+    if (only) return `MEDIDAS:\n${only}`;
+  }
+
+  return `MEDIDAS:\n${source.replace(/\s*mm\s*$/i, '').toUpperCase()}`;
+}
+
 function replaceData(xml, oldValue, newValue) {
   const oldTag = `<pt:data>${oldValue}</pt:data>`;
   const newTag = `<pt:data>${escapeXml(newValue)}</pt:data>`;
@@ -343,7 +359,7 @@ function portonesLabelToXml(label) {
     `FECHA: ${dash(fmtDate(label.fecha || new Date()))}`,
   ].join('\n');
 
-  const medidas = medidasMmText(label);
+  const medidas = medidasMmTwoLineText(label);
   const comercializa = wrapWords(upper(label.comercializa || 'NO'), 12, 3);
 
   xml = replaceDataInTextObject(xml, 'N°3463/3309 ', label.orderCode || label.topCode || 'N°', (fragment) =>
@@ -384,8 +400,21 @@ function portonesLabelToXml(label) {
     return setTextAlign(setTextBox(fragment, { x: '16pt', width: '143pt', height: '43pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
   });
 
-  xml = replaceDataInTextObject(xml, 'MEDIDAS: 2980X2380', `MEDIDAS: ${medidas}`, (fragment) =>
-    setTextBox(fragment, { x: '8pt', width: '160pt', size: '8.4pt', orgPoint: '8.4pt', shrink: 'true', autoLF: 'true' })
+  xml = replaceDataInTextObject(xml, 'MEDIDAS: 2980X2380', medidas, (fragment) =>
+    setTextAlign(
+      setTextBox(fragment, {
+        x: '8pt',
+        y: '425pt',
+        width: '160pt',
+        height: '34pt',
+        size: '9.2pt',
+        orgPoint: '9.2pt',
+        shrink: 'true',
+        autoLF: 'true',
+      }),
+      'CENTER',
+      'CENTER'
+    )
   );
 
   // Texto auxiliar superior de la plantilla original. Lo dejamos vacio para no interferir con el logo.
@@ -439,40 +468,37 @@ function escapeXmlPreserveWhitespace(v) {
 
 
 function prepareSmallTextFragment(fragment) {
-  // La etiqueta chica ahora lleva N°, REF envuelta por palabras y medidas verticales.
-  // Se agranda el area de texto hacia la derecha y se baja la tipografia para que no corte.
+  // La etiqueta chica solo lleva N° y REF.
+  // Usamos mas alto/ancho y autoLF para que nombres largos bajen de renglon
+  // en lugar de cortarse.
   let out = makeTextResponsive(fragment)
-    .replace(/height="39\.8pt"/g, 'height="57pt"')
-    .replace(/width="101\.8pt"/g, 'width="126pt"')
-    .replace(/x="39\.2pt"/g, 'x="35pt"')
-    .replace(/size="24pt"/g, 'size="6pt"')
-    .replace(/size="11\.7pt"/g, 'size="6pt"')
-    .replace(/orgPoint="40pt"/g, 'orgPoint="6pt"')
-    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="6pt"');
-  out = setTextAlign(setTextBox(out, { width: '130pt', height: '57pt', size: '6pt', orgPoint: '6pt', shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
+    .replace(/height="39\.8pt"/g, 'height="44pt"')
+    .replace(/width="101\.8pt"/g, 'width="132pt"')
+    .replace(/x="39\.2pt"/g, 'x="34pt"')
+    .replace(/size="24pt"/g, 'size="9pt"')
+    .replace(/size="11\.7pt"/g, 'size="9pt"')
+    .replace(/orgPoint="40pt"/g, 'orgPoint="9pt"')
+    .replace(/orgPoint="28\.8pt"/g, 'orgPoint="9pt"');
+  out = setTextAlign(setTextBox(out, { width: '132pt', height: '44pt', size: '9pt', orgPoint: '9pt', shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
   return out;
-}
-
-function smallMedidasText(label) {
-  return medidasMmVerticalText(label);
 }
 
 function smallRefText(label) {
   const nvRaw = clean(label?.nv || label?.orderCode || label?.topCode || '');
   const nvMatch = nvRaw.match(/\d+/);
   const nv = nvMatch ? nvMatch[0] : nvRaw;
-  const ref = [clean(label?.cliente), clean(label?.comercializa)].filter(Boolean).join(' / ') || 'NO';
+  const ref = clean(label?.cliente) || 'NO';
 
-  // Partimos por palabras para que "ABERTURAS PH" no quede como "ABERTU".
-  // Maximo 3 lineas de referencia, asi queda espacio para las medidas verticales.
-  const refLines = wrapWords(upper(ref), 13, 2).split('\n').filter(Boolean);
+  // La chica no lleva medidas. Solo N° y REF con el Nombre.
+  // Si el nombre es largo, se parte por espacios en hasta 2 renglones.
+  const refLines = wrapWords(upper(ref), 14, 2).split('\n').filter(Boolean);
   if (refLines.length) {
     refLines[0] = `REF: ${refLines[0]}`;
   } else {
     refLines.push('REF: NO');
   }
 
-  return [`N°${nv}`, ...refLines, smallMedidasText(label)].join('\n');
+  return [`N°${nv}`, ...refLines].join('\n');
 }
 
 function buildSmallPortonesLabelXml(label, copies = 4) {
