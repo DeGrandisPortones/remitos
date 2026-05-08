@@ -36,16 +36,14 @@ function pick(row, names) {
   return '';
 }
 
-function pickAny(rows, names) {
-  for (const row of rows) {
-    const value = pick(row, names);
-    if (clean(value)) return value;
-  }
-  return '';
-}
-
 function firstNonEmpty(...values) {
   return values.find((v) => clean(v) !== '') ?? '';
+}
+
+function resolveEmpresa(req, forcedEmpresa) {
+  const raw = clean(forcedEmpresa || req.query.empresa || req.query.company || req.headers['x-empresa'] || req.headers['x-company']).toLowerCase();
+  if (['ipanel', 'ipanels', 'paneles', 'panel'].includes(raw)) return 'ipanel';
+  return 'portones';
 }
 
 function formatMedidas(row) {
@@ -130,6 +128,15 @@ async function fetchVentaByNv(pool, nv) {
       `,
     },
     {
+      name: 'dbo.NTASVTAS por numero cfecha',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv
+        ORDER BY cfecha DESC;
+      `,
+    },
+    {
       name: 'Portones.dbo.NTASVTAS por numero',
       sql: `
         SELECT TOP (1) *
@@ -197,6 +204,139 @@ async function fetchRemitosByFactura(pool, factura) {
   ], { factura: { type: sql.Int, value: Math.trunc(f) } });
 }
 
+async function fetchPanelesRemitoByNv(pool, nv) {
+  const rows = await tryQuery(pool, [
+    {
+      name: 'Paneles NTASVTAS numero/remito/fecha',
+      sql: `
+        SELECT TOP (10) numero, remito, fecha
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv AND remito IS NOT NULL
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles NTASVTAS numero/remito/cfecha',
+      sql: `
+        SELECT TOP (10) numero, remito, cfecha
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv AND remito IS NOT NULL
+        ORDER BY cfecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles NTASVTAS numero/remito',
+      sql: `
+        SELECT TOP (10) numero, remito
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv AND remito IS NOT NULL;
+      `,
+    },
+  ], { nv: { type: sql.Int, value: nv } });
+
+  const first = rows.find((r) => r?.remito !== null && r?.remito !== undefined);
+  return first?.remito ?? null;
+}
+
+async function fetchPanelesRemitoHeader(pool, remito) {
+  const rows = await tryQuery(pool, [
+    {
+      name: 'Paneles REMITOS por numero fecha',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.REMITOS
+        WHERE TRY_CONVERT(int, numero) = @remito
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles REMITOS por numero',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.REMITOS
+        WHERE TRY_CONVERT(int, numero) = @remito;
+      `,
+    },
+  ], { remito: { type: sql.Int, value: Number(remito) } });
+  return rows[0] || null;
+}
+
+async function fetchPanelesItems(pool, remito, header) {
+  const tipo = clean(header?.tipo);
+  const sucursal = parseIntSafe(header?.sucursal);
+  const inputs = { remito: { type: sql.Int, value: Number(remito) } };
+  const filters = ['TRY_CONVERT(int, i.numero) = @remito'];
+
+  if (tipo) {
+    inputs.tipo = { type: sql.VarChar(10), value: tipo };
+    filters.push('LTRIM(RTRIM(i.tipo)) = @tipo');
+  }
+
+  if (sucursal !== null) {
+    inputs.sucursal = { type: sql.Int, value: sucursal };
+    filters.push('i.sucursal = @sucursal');
+  }
+
+  const where = filters.join(' AND ');
+
+  return tryQuery(pool, [
+    {
+      name: 'Paneles IREMITOS + PRODUCTOS',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha,
+          p.descripcion AS descripcion
+        FROM dbo.IREMITOS i
+        LEFT JOIN dbo.PRODUCTOS p ON p.codigo = i.producto
+        WHERE ${where}
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+    {
+      name: 'Paneles IREMITOS + ARTICULOS descripcion',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha,
+          a.descripcion AS descripcion
+        FROM dbo.IREMITOS i
+        LEFT JOIN dbo.ARTICULOS a ON a.codigo = i.producto
+        WHERE ${where}
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+    {
+      name: 'Paneles IREMITOS + ARTICULOS detalle',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha,
+          a.detalle AS descripcion
+        FROM dbo.IREMITOS i
+        LEFT JOIN dbo.ARTICULOS a ON a.codart = i.producto
+        WHERE ${where}
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+    {
+      name: 'Paneles IREMITOS base',
+      sql: `
+        SELECT TOP (200)
+          i.rnd, i.producto, i.cantidad, i.uventa,
+          i.tipo, i.sucursal, i.numero,
+          i.deposito, i.facnro, i.facfecha
+        FROM dbo.IREMITOS i
+        WHERE ${where}
+        ORDER BY ISNULL(i.rnd, 9999), i.producto;
+      `,
+    },
+  ], inputs);
+}
+
 function remitosLabel(remitos) {
   if (!Array.isArray(remitos) || remitos.length === 0) return 'REMITOS\nPENDIENTES';
   const valid = remitos.filter((r) => !r?.anulado);
@@ -207,7 +347,14 @@ function remitosLabel(remitos) {
     .join('\n');
 }
 
-function toLabel(row, venta, remitos, nv, index) {
+function panelRemitoLabel(header, remito) {
+  const suc = firstNonEmpty(header?.sucursal, '');
+  const nro = firstNonEmpty(header?.numero, remito);
+  if (!clean(nro)) return 'REMITOS\nPENDIENTES';
+  return `REMITO ${clean(suc)}-${clean(nro)}`;
+}
+
+function toPortonLabel(row, venta, remitos, nv, index) {
   const medidas = formatMedidas(row);
   const medidaFinal = formatMedidaFinal(row, medidas);
   const partida = pick(row, ['PARTIDA', 'Partida', 'partida']);
@@ -219,6 +366,7 @@ function toLabel(row, venta, remitos, nv, index) {
     : `NV ${nv}`;
 
   return {
+    brand: 'portones',
     topCode: firstNonEmpty(pick(row, ['Etiqueta', 'Nro Etiqueta', 'Numero Etiqueta', 'Orden Etiqueta']), index),
     orderCode,
     colorPiernas: pick(row, ['COLOR_PIERNAS', 'Color Piernas', 'color_piernas', 'Color_Piernas']),
@@ -246,27 +394,89 @@ function toLabel(row, venta, remitos, nv, index) {
   };
 }
 
-router.get('/etiquetas/portones/by-nv', async (req, res) => {
+function toIpanelLabel(row, venta, header, remito, nv, index) {
+  const producto = pick(row, ['producto', 'Producto', 'codigo', 'Código', 'codart']);
+  const descripcion = pick(row, ['descripcion', 'Descripción', 'detalle', 'Detalle', 'articulo', 'Artículo']);
+  const cantidad = pick(row, ['cantidad', 'Cantidad', 'cant', 'Cant']);
+  const unidad = pick(row, ['uventa', 'Unidad', 'unidad', 'umedida']);
+  const medidas = firstNonEmpty(formatMedidas(row), descripcion);
+  const remitoNumero = firstNonEmpty(header?.numero, remito);
+
+  return {
+    brand: 'ipanel',
+    topCode: `NV ${nv}`,
+    orderCode: firstNonEmpty(producto, `ITEM ${index}`),
+    producto,
+    cantidad,
+    unidad,
+    observacionItem: pick(row, ['observ', 'Observ', 'observacion', 'Observacion', 'observación']),
+    estado: clean(header?.anulado) ? 'ANULADO' : 'OK',
+    revestimiento: descripcion,
+    tarea: 'PANEL COMPUESTO',
+    direccion: firstNonEmpty(pick(header, ['dirent', 'direccion', 'Dirección']), pick(venta, ['dirent', 'direccion', 'Dirección'])),
+    localidad: firstNonEmpty(pick(header, ['localidad']), pick(venta, ['localidad'])),
+    cliente: firstNonEmpty(pick(header, ['nombre']), pick(venta, ['nombre'])),
+    referencia: firstNonEmpty(descripcion, producto),
+    fecha: firstNonEmpty(pick(header, ['fecha', 'cfecha']), pick(venta, ['fecha', 'cfecha'])),
+    comercializa: firstNonEmpty(pick(header, ['vendedor']), pick(venta, ['vendedor'])),
+    medidas,
+    numeroInterno: remitoNumero,
+    remitosPendientes: panelRemitoLabel(header, remito),
+    material: firstNonEmpty(descripcion, producto),
+    nv,
+    medidaFinal: clean(cantidad) ? `CANTIDAD: ${clean(cantidad)} ${clean(unidad)}` : medidas,
+    calculadora: firstNonEmpty(pick(header, ['operador']), pick(venta, ['operador'])),
+    vendedor: firstNonEmpty(pick(header, ['vendedor']), pick(venta, ['vendedor'])),
+    carpinteria: 'IPANEL',
+  };
+}
+
+async function buildPortonesLabels(pool, nv) {
+  const portones = await fetchPortonesByNv(pool, nv);
+  if (!portones.length) return { error: 'No se encontró información de portón para esa NV.' };
+
+  const venta = await fetchVentaByNv(pool, nv);
+  const factura = await fetchFacturaByNv(pool, nv);
+  const remitos = await fetchRemitosByFactura(pool, factura);
+  return { labels: portones.map((row, idx) => toPortonLabel(row, venta, remitos, nv, idx + 1)) };
+}
+
+async function buildIpanelLabels(pool, nv) {
+  const venta = await fetchVentaByNv(pool, nv);
+  const remito = await fetchPanelesRemitoByNv(pool, nv);
+  if (!remito) return { error: 'La NV ingresada no tiene remito aún.' };
+
+  const header = await fetchPanelesRemitoHeader(pool, remito);
+  const items = await fetchPanelesItems(pool, remito, header);
+  const rows = items.length ? items : [{}];
+
+  return { labels: rows.map((row, idx) => toIpanelLabel(row, venta, header, remito, nv, idx + 1)) };
+}
+
+async function handleLabelsByNv(req, res, forcedEmpresa) {
   const nv = parseIntSafe(req.query.nv ?? req.query.numero);
   if (nv === null) {
     return res.status(400).json({ error: 'Query param "nv" must be a number.' });
   }
 
+  const empresa = resolveEmpresa(req, forcedEmpresa);
+  const dbName = empresa === 'ipanel' ? 'Paneles' : 'Portones';
+
   try {
-    // Las etiquetas son de De Grandis Portones: usamos Portones aunque la UI tenga selector de empresa.
-    const pool = await getPool('Portones');
-    const portones = await fetchPortonesByNv(pool, nv);
-    if (!portones.length) {
-      return res.status(404).json({ error: 'No se encontró información de portón para esa NV.' });
+    const pool = await getPool(dbName);
+    const result = empresa === 'ipanel'
+      ? await buildIpanelLabels(pool, nv)
+      : await buildPortonesLabels(pool, nv);
+
+    if (result.error) {
+      return res.status(404).json({ error: result.error });
     }
 
-    const venta = await fetchVentaByNv(pool, nv);
-    const factura = await fetchFacturaByNv(pool, nv);
-    const remitos = await fetchRemitosByFactura(pool, factura);
-    const labels = portones.map((row, idx) => toLabel(row, venta, remitos, nv, idx + 1));
-    const pdfBuffer = await buildPortonLabelsPdf(labels);
+    const pdfBuffer = await buildPortonLabelsPdf(result.labels);
+    const filename = empresa === 'ipanel'
+      ? `etiquetas-ipanel-nv-${nv}.pdf`
+      : `etiquetas-portones-nv-${nv}.pdf`;
 
-    const filename = `etiquetas-portones-nv-${nv}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     return res.send(pdfBuffer);
@@ -274,6 +484,10 @@ router.get('/etiquetas/portones/by-nv', async (req, res) => {
     console.error(err);
     return res.status(500).json({ error: 'Label generation error', detail: String(err.message || err) });
   }
-});
+}
+
+router.get('/etiquetas/by-nv', (req, res) => handleLabelsByNv(req, res));
+router.get('/etiquetas/portones/by-nv', (req, res) => handleLabelsByNv(req, res, 'portones'));
+router.get('/etiquetas/ipanel/by-nv', (req, res) => handleLabelsByNv(req, res, 'ipanel'));
 
 export default router;

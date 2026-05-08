@@ -1,7 +1,14 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import PDFDocument from 'pdfkit';
 
 const PAGE_W = 175.7;
 const PAGE_H = 830.2;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const IPANEL_LOGO_PATH = path.join(__dirname, 'assets', 'ipanel.png');
 
 function clean(v) {
   if (v === null || v === undefined) return '';
@@ -29,7 +36,7 @@ function fmtDate(v) {
 
 function text(doc, value, x, y, width, height, opts = {}) {
   const font = opts.bold ? 'Helvetica-Bold' : 'Helvetica';
-  doc.fillColor('black');
+  doc.fillColor(opts.color || 'black');
   doc.font(font).fontSize(opts.size || 9);
   doc.text(clean(value), x, y, {
     width,
@@ -63,32 +70,68 @@ function drawLogoPlaceholder(doc) {
   text(doc, 'Tel. 0353 4539099', 22, 85, 132, 10, { size: 7.4, align: 'center' });
 }
 
-function drawLabelPage(doc, label) {
-  drawLogoPlaceholder(doc);
+function drawIpanelFallback(doc) {
+  doc.save();
+  doc.rect(37.5, 12, 100, 100).fill('black');
+  text(doc, 'i-panel', 45, 47, 86, 28, { size: 22, bold: true, align: 'center', color: 'white' });
+  text(doc, 'PANEL COMPUESTO', 45, 78, 86, 12, { size: 6.8, bold: true, align: 'center', color: 'white' });
+  doc.restore();
+}
 
-  text(doc, label.topCode, 12.3, 26.4, 151, 42, { size: 34, bold: true, align: 'center' });
-  text(doc, label.orderCode, 3.8, 114.4, 169.2, 38.1, { size: 29, align: 'center' });
+function drawIpanelLogo(doc) {
+  if (fs.existsSync(IPANEL_LOGO_PATH)) {
+    try {
+      doc.image(IPANEL_LOGO_PATH, 37.5, 12, { fit: [100, 100], align: 'center', valign: 'center' });
+      return;
+    } catch (_) {
+      // Fallback vectorial si PDFKit no puede decodificar el PNG.
+    }
+  }
+
+  drawIpanelFallback(doc);
+}
+
+function drawBrandHeader(doc, label) {
+  if (label?.brand === 'ipanel') {
+    drawIpanelLogo(doc);
+    return;
+  }
+
+  drawLogoPlaceholder(doc);
+}
+
+function drawLabelPage(doc, label) {
+  const isIpanel = label?.brand === 'ipanel';
+  drawBrandHeader(doc, label);
+
+  if (isIpanel) {
+    text(doc, label.topCode, 12.3, 108.4, 151, 22, { size: 18, bold: true, align: 'center' });
+    text(doc, label.orderCode, 3.8, 131.4, 169.2, 30, { size: 20, bold: true, align: 'center' });
+  } else {
+    text(doc, label.topCode, 12.3, 26.4, 151, 42, { size: 34, bold: true, align: 'center' });
+    text(doc, label.orderCode, 3.8, 114.4, 169.2, 38.1, { size: 29, align: 'center' });
+  }
 
   const specLabels = [
-    'COLOR PIERNAS:',
-    'REVESTIMIENTO:',
-    'LISTON:',
-    'PUERTA:',
-    'LUCERA:',
-    'ACCIONAMIENTO:',
+    isIpanel ? 'PRODUCTO:' : 'COLOR PIERNAS:',
+    isIpanel ? 'DETALLE:' : 'REVESTIMIENTO:',
+    isIpanel ? 'CANTIDAD:' : 'LISTON:',
+    isIpanel ? 'UNIDAD:' : 'PUERTA:',
+    isIpanel ? 'OBS.:' : 'LUCERA:',
+    isIpanel ? 'ESTADO:' : 'ACCIONAMIENTO:',
   ].join('\n');
   const specValues = [
-    dash(label.colorPiernas),
-    dash(label.revestimiento),
-    dash(label.liston),
-    dash(label.puerta),
-    dash(label.lucera),
-    dash(label.accionamiento),
+    dash(isIpanel ? label.producto : label.colorPiernas),
+    dash(isIpanel ? label.revestimiento : label.revestimiento),
+    dash(isIpanel ? label.cantidad : label.liston),
+    dash(isIpanel ? label.unidad : label.puerta),
+    dash(isIpanel ? label.observacionItem : label.lucera),
+    dash(isIpanel ? label.estado : label.accionamiento),
   ].join('\n');
   text(doc, specLabels, 6.3, 176.4, 84.6, 64.2, { size: 9.6, align: 'right', lineGap: 1.1 });
   text(doc, specValues, 94.3, 174.4, 73.1, 67.8, { size: 9.6, align: 'left', lineGap: 1.1 });
 
-  text(doc, label.tarea || 'INSTALACIÓN', 16.6, 258.4, 149.2, 31.8, { size: 18, bold: true, align: 'center' });
+  text(doc, label.tarea || (isIpanel ? 'PANEL COMPUESTO' : 'INSTALACIÓN'), 16.6, 258.4, 149.2, 31.8, { size: 18, bold: true, align: 'center' });
 
   const detailLabels = [
     'DIRECCION:',
