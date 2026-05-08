@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
-import { buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
+import { buildCompletePortonesLabelLbx, buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
 
 const router = Router();
 
@@ -608,10 +608,38 @@ async function handleSmallEditedLabelLbx(req, res) {
   }
 }
 
+async function handleCompleteEditedLabelLbx(req, res) {
+  try {
+    const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
+    if (!labelsIn.length) {
+      return res.status(400).json({ error: 'Body must include labels array.' });
+    }
+
+    const first = normalizeClientLabel(labelsIn[0]);
+    if (first.brand === 'ipanel') {
+      return res.status(400).json({ error: 'El LBX completo solo esta disponible para etiquetas de Portones.' });
+    }
+
+    const copiesRaw = Number(req.body?.smallCopies ?? req.body?.copies ?? 4);
+    const smallCopies = Number.isFinite(copiesRaw) ? Math.max(1, Math.min(20, Math.trunc(copiesRaw))) : 4;
+    const firstNv = clean(req.body?.nv || first?.nv || first?.topCode || first?.orderCode || 'editada').replace(/[^a-zA-Z0-9_-]/g, '');
+    const lbxBuffer = await buildCompletePortonesLabelLbx(first, smallCopies);
+    const filename = `etiquetas-completo-portones-${firstNv || 'nv'}.lbx`;
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(lbxBuffer);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Complete LBX generation error', detail: String(err.message || err) });
+  }
+}
+
 router.get('/etiquetas/by-nv/data', (req, res) => handleLabelsDataByNv(req, res));
 router.get('/etiquetas/portones/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'portones'));
 router.get('/etiquetas/ipanel/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'ipanel'));
 router.post('/etiquetas/small/lbx', handleSmallEditedLabelLbx);
+router.post('/etiquetas/complete/lbx', handleCompleteEditedLabelLbx);
 router.post('/etiquetas/lbx', handleEditedLabelsLbx);
 
 export default router;

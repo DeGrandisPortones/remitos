@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   fetchLabelDataForNv,
   generateCustomRemitoPdf,
+  generateCompleteLabelLbxFromLabels,
   generateLabelLbxFromLabels,
   generateSmallLabelLbxFromLabels,
   pdfUrlForRemito,
@@ -325,6 +326,28 @@ export default function App() {
       downloadBlob(blob, `etiquetas-chicas-portones-${labelModalNv || 'nv'}-x4.lbx`);
     } catch (err) {
       setError(err?.message || 'Error al generar etiqueta chica LBX');
+    } finally {
+      setLabelLoading(false);
+    }
+  }
+
+
+  async function downloadCompleteEditedLabelLbx() {
+    if (!labelModalLabels.length) return;
+
+    try {
+      setLabelLoading(true);
+      setError('');
+      const blob = await generateCompleteLabelLbxFromLabels({
+        labels: labelModalLabels,
+        nv: labelModalNv,
+        empresa,
+        smallCopies: 4,
+      });
+      downloadBlob(blob, `etiquetas-completo-portones-${labelModalNv || 'nv'}.lbx`);
+      closeLabelModal();
+    } catch (err) {
+      setError(err?.message || 'Error al generar LBX completo');
     } finally {
       setLabelLoading(false);
     }
@@ -736,6 +759,11 @@ export default function App() {
               <button className="btn btn-secondary" type="button" onClick={closeLabelModal} disabled={labelLoading}>
                 Cancelar
               </button>
+              {empresa === 'portones' ? (
+                <button className="btn" type="button" onClick={downloadCompleteEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
+                  {labelLoading ? 'Generando...' : 'LBT completo'}
+                </button>
+              ) : null}
               {empresa === 'portones' ? (
                 <button className="btn btn-secondary" type="button" onClick={downloadEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
                   {labelLoading ? 'Generando...' : 'LBX grande'}

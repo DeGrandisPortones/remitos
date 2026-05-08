@@ -102,6 +102,18 @@ export async function generateSmallLabelLbxFromLabels({ labels, nv, empresa, cop
   });
 }
 
+
+
+export async function generateCompleteLabelLbxFromLabels({ labels, nv, empresa, smallCopies = 4 }) {
+  const base = `${API_BASE}/api/etiquetas/complete/lbx`;
+  const url = withEmpresa(base, empresa);
+  return httpBlob(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels, nv, empresa, smallCopies }),
+  });
+}
+
 export async function generateLabelLbxFromLabels({ labels, nv, empresa }) {
   const base = `${API_BASE}/api/etiquetas/lbx`;
   const url = withEmpresa(base, empresa);

@@ -278,9 +278,94 @@ function buildSmallPortonesLabelXml(label, copies = 4) {
   return xml;
 }
 
+
+function extractObjectFragments(xml) {
+  const pattern = /<(?:text:text|image:image)[\s\S]*?<\/(?:text:text|image:image)>/g;
+  return xml.match(pattern) || [];
+}
+
+function ptToNumber(value) {
+  const n = Number(String(value || '').replace('pt', ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function objectNumber(fragment, attrName) {
+  const re = new RegExp(` ${attrName}="([^"]+)"`);
+  const m = fragment.match(re);
+  return m ? ptToNumber(m[1]) : 0;
+}
+
+function isMainLabelObject(fragment) {
+  const y = objectNumber(fragment, 'y');
+  const x = objectNumber(fragment, 'x');
+  // Conserva solo los objetos visibles de la etiqueta grande.
+  // Descarta la etiqueta chica original y textos viejos que estaban despues del primer corte.
+  return y < 475.5 && x < 176;
+}
+
+function buildCompletePortonesLabelXml(label, smallCopies = 4) {
+  const mainXml = portonesLabelToXml(label);
+  const templateXml = fs.readFileSync(path.join(TEMPLATE_DIR, 'label.xml'), 'utf8').replace(/\r\n/g, '\n');
+
+  const mainObjects = extractObjectFragments(mainXml).filter(isMainLabelObject);
+  const smallText = extractFirstObject(templateXml, 'text:text', 'N°4165');
+  const smallLogo = extractFirstObject(templateXml, 'image:image', 'Imagen19');
+
+  if (!smallText || !smallLogo) {
+    throw new Error('No se encontro la plantilla de etiqueta chica dentro del LBX.');
+  }
+
+  const count = Math.max(1, Math.min(20, Number(smallCopies) || 4));
+  const mainHeight = 475.5;
+  const smallSegmentHeight = 59.2;
+  const smallObjects = [];
+  const textValue = smallRefText(label);
+
+  for (let i = 0; i < count; i += 1) {
+    const delta = smallSegmentHeight * i;
+    const suffix = `completeSmall${i + 1}`;
+    const logo = shiftObjectFragment(smallLogo, delta, suffix);
+    const textObj = replaceDataRaw(
+      shiftObjectFragment(smallText, delta, suffix),
+      'N°4165 \nREF: CORREDIZO ',
+      escapeXmlPreserveWhitespace(textValue)
+    );
+    smallObjects.push(logo, textObj);
+  }
+
+  const totalHeight = Math.round((mainHeight + (smallSegmentHeight * count)) * 10) / 10;
+  const bgHeight = Math.max(1, Math.round((totalHeight - 16.9) * 10) / 10);
+  const cutLineValues = [mainHeight];
+  for (let i = 1; i < count; i += 1) {
+    cutLineValues.push(Math.round((mainHeight + (smallSegmentHeight * i)) * 10) / 10);
+  }
+  const cutLines = cutLineValues.map((v) => `${v}pt`).join(' ');
+
+  let xml = mainXml;
+  xml = xml.replace(/<style:paper([^>]*?)height="[^"]+"([^>]*?)>/, (_m, before, after) => `<style:paper${before}height="${totalHeight}pt"${after}>`);
+  xml = xml.replace(/<style:cutLine[^>]*\/>/, `<style:cutLine regularCut="0pt" freeCut="${cutLines}"/>`);
+  xml = xml.replace(/<style:backGround([^>]*?)height="[^"]+"([^>]*?)\/>/, (_m, before, after) => `<style:backGround${before}height="${bgHeight}pt"${after}/>`);
+  xml = xml.replace(/<pt:objects>[\s\S]*?<\/pt:objects>/, `<pt:objects>${mainObjects.join('')}${smallObjects.join('')}</pt:objects>`);
+
+  return xml;
+}
+
 export async function buildSmallPortonesLabelLbx(label, copies = 4) {
   const normalized = { ...(label || {}), brand: 'portones' };
   const labelXml = buildSmallPortonesLabelXml(normalized, copies);
+
+  return buildZip([
+    { name: 'label.xml', data: Buffer.from(labelXml, 'utf8') },
+    { name: 'prop.xml', data: fs.readFileSync(path.join(TEMPLATE_DIR, 'prop.xml')) },
+    { name: 'Object0.bmp', data: fs.readFileSync(path.join(TEMPLATE_DIR, 'Object0.bmp')) },
+    { name: 'Object1.emf', data: fs.readFileSync(path.join(TEMPLATE_DIR, 'Object1.emf')) },
+  ]);
+}
+
+
+export async function buildCompletePortonesLabelLbx(label, smallCopies = 4) {
+  const normalized = { ...(label || {}), brand: 'portones' };
+  const labelXml = buildCompletePortonesLabelXml(normalized, smallCopies);
 
   return buildZip([
     { name: 'label.xml', data: Buffer.from(labelXml, 'utf8') },
