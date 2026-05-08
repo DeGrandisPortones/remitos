@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
 import { buildPortonLabelsPdf, buildSmallPortonLabelsPdf } from './labelPdf.js';
-import { buildPortonesLabelLbx } from './lbx.js';
+import { buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
 
 const router = Router();
 
@@ -602,6 +602,33 @@ async function handleLabelsByNv(req, res, forcedEmpresa) {
 }
 
 
+async function handleSmallEditedLabelLbx(req, res) {
+  try {
+    const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
+    if (!labelsIn.length) {
+      return res.status(400).json({ error: 'Body must include labels array.' });
+    }
+
+    const first = normalizeClientLabel(labelsIn[0]);
+    if (first.brand === 'ipanel') {
+      return res.status(400).json({ error: 'La etiqueta chica LBX solo esta disponible para Portones.' });
+    }
+
+    const copiesRaw = Number(req.body?.copies ?? 4);
+    const copies = Number.isFinite(copiesRaw) ? Math.max(1, Math.min(20, Math.trunc(copiesRaw))) : 4;
+    const firstNv = clean(req.body?.nv || first?.nv || first?.topCode || first?.orderCode || 'editada').replace(/[^a-zA-Z0-9_-]/g, '');
+    const lbxBuffer = await buildSmallPortonesLabelLbx(first, copies);
+    const filename = `etiquetas-chicas-portones-${firstNv || 'nv'}-x${copies}.lbx`;
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(lbxBuffer);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Small LBX generation error', detail: String(err.message || err) });
+  }
+}
+
 async function handleSmallEditedLabelPdf(req, res) {
   try {
     const labelsIn = Array.isArray(req.body?.labels) ? req.body.labels : [];
@@ -654,6 +681,7 @@ router.get('/etiquetas/by-nv/data', (req, res) => handleLabelsDataByNv(req, res)
 router.get('/etiquetas/portones/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'portones'));
 router.get('/etiquetas/ipanel/by-nv/data', (req, res) => handleLabelsDataByNv(req, res, 'ipanel'));
 router.post('/etiquetas/small/pdf', handleSmallEditedLabelPdf);
+router.post('/etiquetas/small/lbx', handleSmallEditedLabelLbx);
 router.post('/etiquetas/pdf', handleEditedLabelsPdf);
 router.post('/etiquetas/lbx', handleEditedLabelsLbx);
 router.get('/etiquetas/by-nv', (req, res) => handleLabelsByNv(req, res));

@@ -69,12 +69,12 @@ Se agrega una etiqueta chica para Portones con el formato:
 - `N° <NV>`
 - `REF: <Nombre> / <RazSoc>`
 
-Desde el popup de edición se puede usar el botón `PDF chico x4`. El PDF generado trae 4 páginas iguales para que la etiquetadora haga los cortes automáticamente. Los datos usados salen de los valores editados en el popup, por lo que cualquier corrección manual también impacta en la etiqueta chica.
+Desde el popup de edición se puede usar el botón `LBX chico x4`. El archivo LBX generado trae 4 etiquetas chicas iguales sobre cinta continua de 62 mm, con líneas de corte internas para la Brother. Los datos usados salen de los valores editados en el popup, por lo que cualquier corrección manual también impacta en la etiqueta chica.
 
 Endpoint usado por el front:
 
 ```txt
-POST /api/etiquetas/small/pdf
+POST /api/etiquetas/small/lbx
 ```
 
 Body:

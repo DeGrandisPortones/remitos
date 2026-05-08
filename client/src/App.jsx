@@ -4,6 +4,7 @@ import {
   generateCustomRemitoPdf,
   generateLabelLbxFromLabels,
   generateLabelPdfFromLabels,
+  generateSmallLabelLbxFromLabels,
   generateSmallLabelPdfFromLabels,
   pdfUrlForRemito,
   pingServer,
@@ -333,6 +334,26 @@ export default function App() {
     }
   }
 
+
+  async function downloadSmallEditedLabelLbx() {
+    if (!labelModalLabels.length) return;
+
+    try {
+      setLabelLoading(true);
+      setError('');
+      const blob = await generateSmallLabelLbxFromLabels({
+        labels: labelModalLabels,
+        nv: labelModalNv,
+        empresa,
+        copies: 4,
+      });
+      downloadBlob(blob, `etiquetas-chicas-portones-${labelModalNv || 'nv'}-x4.lbx`);
+    } catch (err) {
+      setError(err?.message || 'Error al generar etiqueta chica LBX');
+    } finally {
+      setLabelLoading(false);
+    }
+  }
 
   async function generateSmallEditedLabels() {
     if (!labelModalLabels.length) return;
@@ -768,8 +789,8 @@ export default function App() {
                 </button>
               ) : null}
               {empresa === 'portones' ? (
-                <button className="btn btn-secondary" type="button" onClick={generateSmallEditedLabels} disabled={labelLoading || labelModalLabels.length === 0}>
-                  {labelLoading ? 'Generando...' : 'PDF chico x4'}
+                <button className="btn btn-secondary" type="button" onClick={downloadSmallEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
+                  {labelLoading ? 'Generando...' : 'LBX chico x4'}
                 </button>
               ) : null}
               <button className="btn" type="button" onClick={generateEditedLabels} disabled={labelLoading || labelModalLabels.length === 0}>
