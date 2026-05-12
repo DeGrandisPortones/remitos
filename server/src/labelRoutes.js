@@ -272,34 +272,81 @@ async function fetchVentaByNv(pool, nv) {
 
 
 async function fetchPanelesVentaByNv(pool, nv) {
+  const nvText = String(nv).trim();
+
   const rows = await tryQuery(pool, [
     {
-      name: 'Paneles NTASVTAS por numero',
+      name: 'Paneles NTASVTAS por numero directo',
       sql: `
         SELECT TOP (1) *
         FROM dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv
+        WHERE numero = @nv
         ORDER BY fecha DESC;
       `,
     },
     {
-      name: 'Paneles NTASVTAS por idpedido',
+      name: 'Paneles NTASVTAS por numero texto',
       sql: `
         SELECT TOP (1) *
         FROM dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, idpedido) = @nv
+        WHERE LTRIM(RTRIM(CONVERT(varchar(50), numero))) = @nvText
+           OR LTRIM(RTRIM(CONVERT(varchar(50), numero))) LIKE @nvTextLike
         ORDER BY fecha DESC;
       `,
     },
-  ], { nv: { type: sql.Int, value: nv } });
+    {
+      name: 'Paneles NTASVTAS por idpedido directo',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.NTASVTAS
+        WHERE idpedido = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles NTASVTAS por idpedido texto',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.NTASVTAS
+        WHERE LTRIM(RTRIM(CONVERT(varchar(50), idpedido))) = @nvText
+           OR LTRIM(RTRIM(CONVERT(varchar(50), idpedido))) LIKE @nvTextLike
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles cross-db NTASVTAS por numero directo',
+      sql: `
+        SELECT TOP (1) *
+        FROM [Paneles].[dbo].[NTASVTAS]
+        WHERE numero = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles cross-db NTASVTAS por numero texto',
+      sql: `
+        SELECT TOP (1) *
+        FROM [Paneles].[dbo].[NTASVTAS]
+        WHERE LTRIM(RTRIM(CONVERT(varchar(50), numero))) = @nvText
+           OR LTRIM(RTRIM(CONVERT(varchar(50), numero))) LIKE @nvTextLike
+        ORDER BY fecha DESC;
+      `,
+    },
+  ], {
+    nv: { type: sql.Int, value: nv },
+    nvText: { type: sql.VarChar(50), value: nvText },
+    nvTextLike: { type: sql.VarChar(60), value: `${nvText}.%` },
+  });
 
   return rows[0] || null;
 }
 
 async function fetchPanelesProductosByNv(pool, nv) {
+  const nvText = String(nv).trim();
+
   return tryQuery(pool, [
     {
-      name: 'Paneles INTASVTAS + PRODUCTOS por numero',
+      name: 'Paneles INTASVTAS + PRODUCTOS por numero directo',
       sql: `
         SELECT TOP (100)
           i.fecha,
@@ -313,12 +360,32 @@ async function fetchPanelesProductosByNv(pool, nv) {
         FROM dbo.INTASVTAS i
         LEFT JOIN dbo.PRODUCTOS p
           ON LTRIM(RTRIM(CONVERT(varchar(50), p.codigo))) = LTRIM(RTRIM(CONVERT(varchar(50), i.producto)))
-        WHERE TRY_CONVERT(int, i.numero) = @nv
+        WHERE i.numero = @nv
         ORDER BY i.fecha DESC, i.producto;
       `,
     },
     {
-      name: 'Paneles INTASVTAS base por numero',
+      name: 'Paneles INTASVTAS + PRODUCTOS por numero texto',
+      sql: `
+        SELECT TOP (100)
+          i.fecha,
+          i.tipo,
+          i.sucursal,
+          i.numero,
+          i.producto,
+          i.cantidad,
+          i.uventa,
+          p.descripcion
+        FROM dbo.INTASVTAS i
+        LEFT JOIN dbo.PRODUCTOS p
+          ON LTRIM(RTRIM(CONVERT(varchar(50), p.codigo))) = LTRIM(RTRIM(CONVERT(varchar(50), i.producto)))
+        WHERE LTRIM(RTRIM(CONVERT(varchar(50), i.numero))) = @nvText
+           OR LTRIM(RTRIM(CONVERT(varchar(50), i.numero))) LIKE @nvTextLike
+        ORDER BY i.fecha DESC, i.producto;
+      `,
+    },
+    {
+      name: 'Paneles INTASVTAS base por numero directo',
       sql: `
         SELECT TOP (100)
           fecha,
@@ -329,11 +396,34 @@ async function fetchPanelesProductosByNv(pool, nv) {
           cantidad,
           uventa
         FROM dbo.INTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv
+        WHERE numero = @nv
         ORDER BY fecha DESC, producto;
       `,
     },
-  ], { nv: { type: sql.Int, value: nv } });
+    {
+      name: 'Paneles cross-db INTASVTAS + PRODUCTOS por numero directo',
+      sql: `
+        SELECT TOP (100)
+          i.fecha,
+          i.tipo,
+          i.sucursal,
+          i.numero,
+          i.producto,
+          i.cantidad,
+          i.uventa,
+          p.descripcion
+        FROM [Paneles].[dbo].[INTASVTAS] i
+        LEFT JOIN [Paneles].[dbo].[PRODUCTOS] p
+          ON LTRIM(RTRIM(CONVERT(varchar(50), p.codigo))) = LTRIM(RTRIM(CONVERT(varchar(50), i.producto)))
+        WHERE i.numero = @nv
+        ORDER BY i.fecha DESC, i.producto;
+      `,
+    },
+  ], {
+    nv: { type: sql.Int, value: nv },
+    nvText: { type: sql.VarChar(50), value: nvText },
+    nvTextLike: { type: sql.VarChar(60), value: `${nvText}.%` },
+  });
 }
 
 function panelesProductoTexto(rows) {
