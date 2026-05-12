@@ -41,8 +41,7 @@ const IPANEL_LABEL_FIELDS = [
   { key: 'direccion', label: 'Direccion' },
   { key: 'localidad', label: 'Localidad' },
   { key: 'fecha', label: 'Fecha', type: 'date' },
-  { key: 'comercializa', label: 'Vendedor / comercializa' },
-  { key: 'observacionItem', label: 'Observacion' },
+  { key: 'observacionItem', label: 'Observaciones' },
 ];
 
 function fmtDate(v) {

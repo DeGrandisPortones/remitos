@@ -24,3 +24,8 @@ Este patch agrega generacion de etiqueta grande LBX para IPANELS.
 
 Para IPANELS solo se muestra el boton `LBX grande`.
 Para Portones se mantienen `LBT completo`, `LBX grande` y `LBX chico x4`.
+
+
+## Ajuste observaciones
+
+En la etiqueta grande de Ipanels, el bloque inferior ahora imprime `OBSERVACIONES` usando `Paneles.dbo.NTASVTAS.observ`. Ya no imprime vendedor/comercializa en ese sector.

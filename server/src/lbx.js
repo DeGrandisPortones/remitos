@@ -414,7 +414,7 @@ function ipanelLabelToXml(label) {
     `FECHA: ${dash(fmtDateDash(label.fechaVenta || label.fecha || new Date()))}`,
   ].join('\n');
 
-  const vendedor = wrapWords(upper(label.comercializa || label.vendedor || 'NO'), 14, 3);
+  const observaciones = wrapWords(upper(label.observacionItem || label.observaciones || 'NO'), 20, 4);
 
   xml = replaceDataInTextObject(xml, 'N°3463/3309 ', nvDisplayText(label), (fragment) =>
     setTextBox(fragment, { size: '31pt', orgPoint: '31pt', shrink: 'true', autoLF: 'true' })
@@ -456,15 +456,15 @@ function ipanelLabelToXml(label) {
     setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
   );
 
-  xml = replaceDataInTextObject(xml, 'COMERCIALIZA', 'VENDEDOR', (fragment) =>
-    setTextBox(fragment, { x: '8pt', width: '90pt', size: '8.5pt', orgPoint: '8.5pt' })
+  xml = replaceDataInTextObject(xml, 'COMERCIALIZA', 'OBSERVACIONES', (fragment) =>
+    setTextBox(fragment, { x: '8pt', width: '120pt', size: '8.5pt', orgPoint: '8.5pt' })
   );
 
-  xml = replaceDataInTextObject(xml, 'BARENGO', vendedor, (fragment) => {
-    const lines = vendedor.split('\n').length;
-    const maxLen = Math.max(...vendedor.split('\n').map((line) => line.length));
-    const size = lines > 1 ? (maxLen > 14 ? 11 : 13) : (maxLen > 15 ? 14 : 17);
-    return setTextAlign(setTextBox(fragment, { x: '16pt', width: '143pt', height: '43pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
+  xml = replaceDataInTextObject(xml, 'BARENGO', observaciones, (fragment) => {
+    const lines = observaciones.split('\n').length;
+    const maxLen = Math.max(...observaciones.split('\n').map((line) => line.length));
+    const size = lines > 2 ? (maxLen > 18 ? 8.5 : 9.5) : (maxLen > 20 ? 10 : 12);
+    return setTextAlign(setTextBox(fragment, { x: '10pt', width: '155pt', height: '46pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' }), 'LEFT', 'CENTER');
   });
 
   xml = replaceDataInTextObject(xml, 'MEDIDAS: 2980X2380', ' ', (fragment) =>
