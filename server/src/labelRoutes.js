@@ -61,6 +61,37 @@ function removeDigitsFromText(value) {
   return stripped || 'NO';
 }
 
+function normalizeSqlDateInput(value) {
+  const s = clean(value);
+  if (!s || s.toLowerCase() === 'null' || s === 'NO') return '';
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+  if (dmy) {
+    const dd = dmy[1].padStart(2, '0');
+    const mm = dmy[2].padStart(2, '0');
+    return `${dmy[3]}-${mm}-${dd}`;
+  }
+
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return s;
+}
+
+function pickFechaVenta(row) {
+  const raw = pick(row, ['Fecha', 'fecha', 'FECHA', 'Fecha_NV', 'FECHA_NV', 'fecha_nv']);
+  const normalized = normalizeSqlDateInput(raw);
+  return normalized || 'NO';
+}
+
 function formatDimensionMm(v) {
   const s = clean(v);
   if (!s || s.toLowerCase() === 'null' || s === 'NO') return 'NO';
@@ -372,6 +403,63 @@ async function fetchPanelesItems(pool, remito, header) {
   ], inputs);
 }
 
+
+async function fetchFechaVentaPortonesByNv(pool, nv) {
+  const attempts = [
+    {
+      name: 'Portones NTASVTAS fecha por numero NV',
+      sql: `
+        SELECT TOP (1) fecha
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Portones NTASVTAS fecha por idpedido NV',
+      sql: `
+        SELECT TOP (1) fecha
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, idpedido) = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Cross database Portones.dbo.NTASVTAS fecha por numero NV',
+      sql: `
+        SELECT TOP (1) fecha
+        FROM Portones.dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Cross database Portones.dbo.NTASVTAS fecha por idpedido NV',
+      sql: `
+        SELECT TOP (1) fecha
+        FROM Portones.dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, idpedido) = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const result = await pool.request()
+        .input('nv', sql.Int, nv)
+        .query(attempt.sql);
+      const raw = result.recordset?.[0]?.fecha;
+      const normalized = normalizeSqlDateInput(raw);
+      if (normalized) return normalized;
+    } catch (err) {
+      console.warn(`No se pudo buscar fecha de venta (${attempt.name}):`, err?.message || err);
+    }
+  }
+
+  return 'NO';
+}
+
 function panelRemitoLabel(header, remito) {
   const suc = firstNonEmpty(header?.sucursal, '');
   const nro = firstNonEmpty(header?.numero, remito);
@@ -415,7 +503,7 @@ function splitAddress(value) {
   return { line1: line1 || s.slice(0, maxLen), line2: line2 || 'NO' };
 }
 
-function toPortonPreProduccionLabel(row, nv, index) {
+function toPortonPreProduccionLabel(row, nv, index, fechaVenta) {
   const medidas = formatMedidasMm(row);
   const direccion = prop(row, ['Direccion', 'Dirección', 'DIRECCION']);
   const direccionParts = splitAddress(direccion);
@@ -434,6 +522,8 @@ function toPortonPreProduccionLabel(row, nv, index) {
     lucera: prop(row, ['Lucera', 'LUCERA']),
     accionamiento: accionamiento || 'NO',
     tarea: prop(row, ['Tipo_Embalaje', 'Tipo Embalaje', 'TIPO_EMBALAJE']),
+    // La fecha de venta viene de Portones.dbo.NTASVTAS, no de WebApp.dbo.Pre_Produccion.
+    fechaVenta: fechaVenta || 'NO',
     direccion: direccionParts.line1,
     direccion2: direccionParts.line2,
     cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
@@ -489,7 +579,7 @@ function toIpanelLabel(row, venta, header, remito, nv, index) {
   };
 }
 
-async function buildPortonesLabels(pool, nv) {
+async function buildPortonesLabels(pool, nv, fechaVenta) {
   const rows = await fetchPreProduccionPortonesByNv(pool, nv);
 
   if (!rows.length) {
@@ -497,7 +587,7 @@ async function buildPortonesLabels(pool, nv) {
   }
 
   return {
-    labels: rows.map((row, idx) => toPortonPreProduccionLabel(row, nv, idx + 1)),
+    labels: rows.map((row, idx) => toPortonPreProduccionLabel(row, nv, idx + 1, fechaVenta)),
   };
 }
 
@@ -520,11 +610,19 @@ async function buildLabelsForRequest(req, forcedEmpresa) {
   }
 
   const empresa = resolveEmpresa(req, forcedEmpresa);
-  const dbName = empresa === 'ipanel' ? 'Paneles' : 'WebApp';
-  const pool = await getPool(dbName);
-  const result = empresa === 'ipanel'
-    ? await buildIpanelLabels(pool, nv)
-    : await buildPortonesLabels(pool, nv);
+
+  let result;
+  if (empresa === 'ipanel') {
+    const panelesPool = await getPool('Paneles');
+    result = await buildIpanelLabels(panelesPool, nv);
+  } else {
+    // La etiqueta toma medidas/datos tecnicos de WebApp.dbo.Pre_Produccion,
+    // pero la fecha de venta viene de Portones.dbo.NTASVTAS.fecha.
+    const webAppPool = await getPool('WebApp');
+    const portonesPool = await getPool('Portones');
+    const fechaVenta = await fetchFechaVentaPortonesByNv(portonesPool, nv);
+    result = await buildPortonesLabels(webAppPool, nv, fechaVenta);
+  }
 
   if (result.error) return { status: 404, error: result.error };
   return { status: 200, empresa, nv, labels: result.labels };
@@ -541,6 +639,7 @@ function normalizeClientLabel(label) {
   out.lucera = clean(out.lucera);
   out.accionamiento = clean(out.accionamiento);
   out.tarea = clean(out.tarea);
+  out.fechaVenta = clean(out.fechaVenta);
   out.direccion = clean(out.direccion);
   out.direccion2 = clean(out.direccion2);
   out.localidad = clean(out.localidad);

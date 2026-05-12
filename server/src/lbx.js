@@ -168,6 +168,28 @@ function fmtDate(v) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function fmtDateDash(v) {
+  const s = clean(v);
+  if (!s || s.toLowerCase() === 'null' || s.toUpperCase() === 'NO') return 'NO';
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+
+  const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+  if (dmy) {
+    const dd = dmy[1].padStart(2, '0');
+    const mm = dmy[2].padStart(2, '0');
+    return `${dd}-${mm}-${dmy[3]}`;
+  }
+
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
 function wrapWords(value, maxChars = 12, maxLines = 2) {
   const source = clean(value);
   if (!source) return '';
@@ -369,6 +391,7 @@ function portonesLabelToXml(label) {
   ].join('\n');
 
   const detailLines = [
+    `FECHA DE VENTA: ${dash(fmtDateDash(label.fechaVenta || 'NO'))}`,
     ...pairLines('DIRECCION:', dash(upper(label.direccion || 'NO')), 34, 2),
     ...pairLines('LOCALIDAD:', dash(upper(label.direccion2 || 'NO')), 34, 2),
     ...pairLines('CLIENTE:', dash(upper(label.cliente || 'NO')), 34, 2),
@@ -403,7 +426,7 @@ function portonesLabelToXml(label) {
   // Igual que las especificaciones: datos de direccion/cliente/fecha en un solo objeto ancho.
   // Si un valor no entra, se parte por palabras y sigue abajo.
   xml = replaceDataInTextObject(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLines, (fragment) =>
-    setTextAlign(setTextBox(fragment, { x: '8pt', y: '300pt', width: '160pt', height: '70pt', size: '6.8pt', orgPoint: '6.8pt', shrink: 'true', autoLF: 'true' }), 'LEFT', 'CENTER')
+    setTextAlign(setTextBox(fragment, { x: '8pt', y: '291pt', width: '160pt', height: '82pt', size: '6.4pt', orgPoint: '6.4pt', shrink: 'true', autoLF: 'true' }), 'LEFT', 'CENTER')
   );
   xml = replaceDataInTextObject(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', ' ', (fragment) =>
     setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })

@@ -25,6 +25,7 @@ const PORTONES_LABEL_FIELDS = [
   { key: 'lucera', label: 'Lucera' },
   { key: 'accionamiento', label: 'Accionamiento' },
   { key: 'tarea', label: 'Instalacion / Embalaje' },
+  { key: 'fechaVenta', label: 'Fecha de venta', type: 'date' },
   { key: 'direccion', label: 'Direccion linea 1' },
   { key: 'direccion2', label: 'Direccion linea 2' },
   { key: 'cliente', label: 'Cliente' },
@@ -260,6 +261,7 @@ export default function App() {
       const labels = (data.labels || []).map((label) => ({
         ...label,
         fecha: normalizeDateInput(label.fecha),
+        fechaVenta: normalizeDateInput(label.fechaVenta),
       }));
 
       if (!labels.length) {
