@@ -68,9 +68,3 @@ El archivo usa la misma plantilla Brother de 62 mm continua y define cortes entr
 ## Cambio: Fecha de venta
 
 La etiqueta grande imprime `FECHA DE VENTA` arriba de `DIRECCION`, tomando `Fecha`, `fecha` o `Fecha_NV` desde `WebApp.dbo.Pre_Produccion` y mostrando el valor en formato `DD-MM-AAAA`.
-
-## Ajuste fecha de venta
-
-La fecha de venta que se imprime arriba de Direccion en la etiqueta grande se obtiene desde `Portones.dbo.NTASVTAS.fecha`, buscando por la NV en `numero` y, como fallback, en `idpedido`.
-
-El formato de salida en la etiqueta es `DD-MM-AAAA`.

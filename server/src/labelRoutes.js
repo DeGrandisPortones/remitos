@@ -403,63 +403,6 @@ async function fetchPanelesItems(pool, remito, header) {
   ], inputs);
 }
 
-
-async function fetchFechaVentaPortonesByNv(pool, nv) {
-  const attempts = [
-    {
-      name: 'Portones NTASVTAS fecha por numero NV',
-      sql: `
-        SELECT TOP (1) fecha
-        FROM dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv
-        ORDER BY fecha DESC;
-      `,
-    },
-    {
-      name: 'Portones NTASVTAS fecha por idpedido NV',
-      sql: `
-        SELECT TOP (1) fecha
-        FROM dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, idpedido) = @nv
-        ORDER BY fecha DESC;
-      `,
-    },
-    {
-      name: 'Cross database Portones.dbo.NTASVTAS fecha por numero NV',
-      sql: `
-        SELECT TOP (1) fecha
-        FROM Portones.dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, numero) = @nv
-        ORDER BY fecha DESC;
-      `,
-    },
-    {
-      name: 'Cross database Portones.dbo.NTASVTAS fecha por idpedido NV',
-      sql: `
-        SELECT TOP (1) fecha
-        FROM Portones.dbo.NTASVTAS
-        WHERE TRY_CONVERT(int, idpedido) = @nv
-        ORDER BY fecha DESC;
-      `,
-    },
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const result = await pool.request()
-        .input('nv', sql.Int, nv)
-        .query(attempt.sql);
-      const raw = result.recordset?.[0]?.fecha;
-      const normalized = normalizeSqlDateInput(raw);
-      if (normalized) return normalized;
-    } catch (err) {
-      console.warn(`No se pudo buscar fecha de venta (${attempt.name}):`, err?.message || err);
-    }
-  }
-
-  return 'NO';
-}
-
 function panelRemitoLabel(header, remito) {
   const suc = firstNonEmpty(header?.sucursal, '');
   const nro = firstNonEmpty(header?.numero, remito);
@@ -503,7 +446,7 @@ function splitAddress(value) {
   return { line1: line1 || s.slice(0, maxLen), line2: line2 || 'NO' };
 }
 
-function toPortonPreProduccionLabel(row, nv, index, fechaVenta) {
+function toPortonPreProduccionLabel(row, nv, index) {
   const medidas = formatMedidasMm(row);
   const direccion = prop(row, ['Direccion', 'Dirección', 'DIRECCION']);
   const direccionParts = splitAddress(direccion);
@@ -522,8 +465,7 @@ function toPortonPreProduccionLabel(row, nv, index, fechaVenta) {
     lucera: prop(row, ['Lucera', 'LUCERA']),
     accionamiento: accionamiento || 'NO',
     tarea: prop(row, ['Tipo_Embalaje', 'Tipo Embalaje', 'TIPO_EMBALAJE']),
-    // La fecha de venta viene de Portones.dbo.NTASVTAS, no de WebApp.dbo.Pre_Produccion.
-    fechaVenta: fechaVenta || 'NO',
+    fechaVenta: pickFechaVenta(row),
     direccion: direccionParts.line1,
     direccion2: direccionParts.line2,
     cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
@@ -579,7 +521,7 @@ function toIpanelLabel(row, venta, header, remito, nv, index) {
   };
 }
 
-async function buildPortonesLabels(pool, nv, fechaVenta) {
+async function buildPortonesLabels(pool, nv) {
   const rows = await fetchPreProduccionPortonesByNv(pool, nv);
 
   if (!rows.length) {
@@ -587,7 +529,7 @@ async function buildPortonesLabels(pool, nv, fechaVenta) {
   }
 
   return {
-    labels: rows.map((row, idx) => toPortonPreProduccionLabel(row, nv, idx + 1, fechaVenta)),
+    labels: rows.map((row, idx) => toPortonPreProduccionLabel(row, nv, idx + 1)),
   };
 }
 
@@ -610,19 +552,11 @@ async function buildLabelsForRequest(req, forcedEmpresa) {
   }
 
   const empresa = resolveEmpresa(req, forcedEmpresa);
-
-  let result;
-  if (empresa === 'ipanel') {
-    const panelesPool = await getPool('Paneles');
-    result = await buildIpanelLabels(panelesPool, nv);
-  } else {
-    // La etiqueta toma medidas/datos tecnicos de WebApp.dbo.Pre_Produccion,
-    // pero la fecha de venta viene de Portones.dbo.NTASVTAS.fecha.
-    const webAppPool = await getPool('WebApp');
-    const portonesPool = await getPool('Portones');
-    const fechaVenta = await fetchFechaVentaPortonesByNv(portonesPool, nv);
-    result = await buildPortonesLabels(webAppPool, nv, fechaVenta);
-  }
+  const dbName = empresa === 'ipanel' ? 'Paneles' : 'WebApp';
+  const pool = await getPool(dbName);
+  const result = empresa === 'ipanel'
+    ? await buildIpanelLabels(pool, nv)
+    : await buildPortonesLabels(pool, nv);
 
   if (result.error) return { status: 404, error: result.error };
   return { status: 200, empresa, nv, labels: result.labels };
