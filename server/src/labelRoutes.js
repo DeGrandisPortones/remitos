@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
-import { buildCompletePortonesLabelLbx, buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
+import { buildCompletePortonesLabelLbx, buildIpanelLabelLbx, buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
 
 const router = Router();
 
@@ -270,6 +270,135 @@ async function fetchVentaByNv(pool, nv) {
   return rows[0] || null;
 }
 
+
+async function fetchPanelesVentaByNv(pool, nv) {
+  const rows = await tryQuery(pool, [
+    {
+      name: 'Paneles NTASVTAS por numero',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+    {
+      name: 'Paneles NTASVTAS por idpedido',
+      sql: `
+        SELECT TOP (1) *
+        FROM dbo.NTASVTAS
+        WHERE TRY_CONVERT(int, idpedido) = @nv
+        ORDER BY fecha DESC;
+      `,
+    },
+  ], { nv: { type: sql.Int, value: nv } });
+
+  return rows[0] || null;
+}
+
+async function fetchPanelesProductosByNv(pool, nv) {
+  return tryQuery(pool, [
+    {
+      name: 'Paneles INTASVTAS + PRODUCTOS por numero',
+      sql: `
+        SELECT TOP (100)
+          i.fecha,
+          i.tipo,
+          i.sucursal,
+          i.numero,
+          i.producto,
+          i.cantidad,
+          i.uventa,
+          p.descripcion
+        FROM dbo.INTASVTAS i
+        LEFT JOIN dbo.PRODUCTOS p
+          ON LTRIM(RTRIM(CONVERT(varchar(50), p.codigo))) = LTRIM(RTRIM(CONVERT(varchar(50), i.producto)))
+        WHERE TRY_CONVERT(int, i.numero) = @nv
+        ORDER BY i.fecha DESC, i.producto;
+      `,
+    },
+    {
+      name: 'Paneles INTASVTAS base por numero',
+      sql: `
+        SELECT TOP (100)
+          fecha,
+          tipo,
+          sucursal,
+          numero,
+          producto,
+          cantidad,
+          uventa
+        FROM dbo.INTASVTAS
+        WHERE TRY_CONVERT(int, numero) = @nv
+        ORDER BY fecha DESC, producto;
+      `,
+    },
+  ], { nv: { type: sql.Int, value: nv } });
+}
+
+function panelesProductoTexto(rows) {
+  const values = [];
+  const seen = new Set();
+
+  for (const row of rows || []) {
+    const text = firstNonEmpty(
+      pick(row, ['descripcion', 'Descripcion', 'DESCRIPCION']),
+      pick(row, ['producto', 'Producto', 'PRODUCTO'])
+    );
+    const value = clean(text);
+    const key = value.toLowerCase();
+    if (value && !seen.has(key)) {
+      seen.add(key);
+      values.push(value);
+    }
+  }
+
+  return values.length ? values.join(' / ') : 'NO';
+}
+
+function toIpanelVentaLabel(venta, productos, nv) {
+  const numero = firstNonEmpty(pick(venta, ['numero', 'Numero', 'NUMERO']), nv);
+  const direccion = firstNonEmpty(
+    pick(venta, ['dirent', 'Dirent', 'DIRENT']),
+    pick(venta, ['direccion', 'Direccion', 'DIRECCION'])
+  );
+  const localidad = [
+    pick(venta, ['localidad', 'Localidad', 'LOCALIDAD']),
+    pick(venta, ['provincia', 'Provincia', 'PROVINCIA']),
+  ].map(clean).filter(Boolean).join(' - ');
+  const fechaVenta = normalizeSqlDateInput(pick(venta, ['fecha', 'Fecha', 'FECHA']));
+
+  return {
+    brand: 'ipanel',
+    topCode: `NV ${clean(numero)}`,
+    orderCode: `NV ${clean(numero)}`,
+    producto: panelesProductoTexto(productos),
+    cantidad: '',
+    unidad: '',
+    observacionItem: firstNonEmpty(pick(venta, ['observ', 'Observ', 'OBSERV']), pick(venta, ['obs', 'Obs', 'OBS'])),
+    estado: prop(venta, ['condicion', 'Condicion', 'CONDICION']),
+    revestimiento: panelesProductoTexto(productos),
+    tarea: 'IPANELS',
+    direccion: prop({ value: direccion }, ['value']),
+    direccion2: prop({ value: localidad }, ['value']),
+    localidad: prop({ value: localidad }, ['value']),
+    cliente: prop(venta, ['nombre', 'Nombre', 'NOMBRE']),
+    referencia: prop(venta, ['cliente', 'Cliente', 'CLIENTE']),
+    fechaVenta: fechaVenta || 'NO',
+    fecha: fechaVenta || new Date(),
+    comercializa: prop(venta, ['vendedor', 'Vendedor', 'VENDEDOR']),
+    medidas: '',
+    numeroInterno: clean(numero),
+    remitosPendientes: '',
+    material: panelesProductoTexto(productos),
+    nv: clean(numero),
+    medidaFinal: '',
+    calculadora: prop(venta, ['operador', 'Operador', 'OPERADOR']),
+    vendedor: prop(venta, ['vendedor', 'Vendedor', 'VENDEDOR']),
+    carpinteria: 'IPANELS',
+  };
+}
+
 async function fetchPanelesRemitoByNv(pool, nv) {
   const rows = await tryQuery(pool, [
     {
@@ -534,15 +663,13 @@ async function buildPortonesLabels(pool, nv) {
 }
 
 async function buildIpanelLabels(pool, nv) {
-  const venta = await fetchVentaByNv(pool, nv);
-  const remito = await fetchPanelesRemitoByNv(pool, nv);
-  if (!remito) return { error: 'La NV ingresada no tiene remito aun.' };
+  const venta = await fetchPanelesVentaByNv(pool, nv);
+  if (!venta) {
+    return { error: 'No se encontro informacion en Paneles.dbo.NTASVTAS para esa NV.' };
+  }
 
-  const header = await fetchPanelesRemitoHeader(pool, remito);
-  const items = await fetchPanelesItems(pool, remito, header);
-  const rows = items.length ? items : [{}];
-
-  return { labels: rows.map((row, idx) => toIpanelLabel(row, venta, header, remito, nv, idx + 1)) };
+  const productos = await fetchPanelesProductosByNv(pool, nv);
+  return { labels: [toIpanelVentaLabel(venta, productos, nv)] };
 }
 
 async function buildLabelsForRequest(req, forcedEmpresa) {
@@ -565,6 +692,7 @@ async function buildLabelsForRequest(req, forcedEmpresa) {
 function normalizeClientLabel(label) {
   const out = { ...(label || {}) };
   out.brand = clean(out.brand) || 'portones';
+  out.topCode = clean(out.topCode);
   out.orderCode = clean(out.orderCode);
   out.colorPiernas = clean(out.colorPiernas);
   out.revestimiento = clean(out.revestimiento);
@@ -582,6 +710,13 @@ function normalizeClientLabel(label) {
   out.fecha = clean(out.fecha) || new Date().toISOString();
   out.comercializa = removeDigitsFromText(out.comercializa);
   out.medidas = clean(out.medidas);
+  out.producto = clean(out.producto);
+  out.cantidad = clean(out.cantidad);
+  out.unidad = clean(out.unidad);
+  out.observacionItem = clean(out.observacionItem);
+  out.estado = clean(out.estado);
+  out.vendedor = clean(out.vendedor);
+  out.calculadora = clean(out.calculadora);
   return out;
 }
 
@@ -594,13 +729,14 @@ async function handleEditedLabelsLbx(req, res) {
     }
 
     const first = normalizeClientLabel(labelsIn[0]);
-    if (first.brand === 'ipanel') {
-      return res.status(400).json({ error: 'LBX Brother solo esta disponible para etiquetas de Portones.' });
-    }
-
     const firstNv = clean(req.body?.nv || first?.nv || first?.topCode || first?.orderCode || 'editada').replace(/[^a-zA-Z0-9_-]/g, '');
-    const lbxBuffer = await buildPortonesLabelLbx(first);
-    const filename = `etiqueta-portones-${firstNv || 'nv'}.lbx`;
+    const isIpanel = String(first.brand).toLowerCase() === 'ipanel';
+    const lbxBuffer = isIpanel
+      ? await buildIpanelLabelLbx(first)
+      : await buildPortonesLabelLbx(first);
+    const filename = isIpanel
+      ? `etiqueta-ipanel-${firstNv || 'nv'}.lbx`
+      : `etiqueta-portones-${firstNv || 'nv'}.lbx`;
 
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

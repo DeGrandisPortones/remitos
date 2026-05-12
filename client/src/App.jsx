@@ -35,22 +35,14 @@ const PORTONES_LABEL_FIELDS = [
 ];
 
 const IPANEL_LABEL_FIELDS = [
-  { key: 'topCode', label: 'NV' },
-  { key: 'orderCode', label: 'Codigo / item' },
+  { key: 'orderCode', label: 'NV' },
   { key: 'producto', label: 'Producto' },
-  { key: 'revestimiento', label: 'Detalle' },
-  { key: 'cantidad', label: 'Cantidad' },
-  { key: 'unidad', label: 'Unidad' },
-  { key: 'observacionItem', label: 'Observacion item' },
-  { key: 'estado', label: 'Estado' },
-  { key: 'tarea', label: 'Titulo' },
+  { key: 'cliente', label: 'Cliente / distribuidor' },
   { key: 'direccion', label: 'Direccion' },
   { key: 'localidad', label: 'Localidad' },
-  { key: 'cliente', label: 'Cliente' },
-  { key: 'referencia', label: 'Referencia' },
   { key: 'fecha', label: 'Fecha', type: 'date' },
-  { key: 'comercializa', label: 'Comercializa' },
-  { key: 'medidas', label: 'Medidas' },
+  { key: 'comercializa', label: 'Vendedor / comercializa' },
+  { key: 'observacionItem', label: 'Observacion' },
 ];
 
 function fmtDate(v) {
@@ -303,7 +295,8 @@ export default function App() {
         nv: labelModalNv,
         empresa,
       });
-      downloadBlob(blob, `etiqueta-portones-${labelModalNv || 'nv'}.lbx`);
+      const prefix = empresa === 'ipanel' ? 'etiqueta-ipanel' : 'etiqueta-portones';
+      downloadBlob(blob, `${prefix}-${labelModalNv || 'nv'}.lbx`);
       closeLabelModal();
     } catch (err) {
       setError(err?.message || 'Error al generar archivo LBX');
@@ -766,11 +759,9 @@ export default function App() {
                   {labelLoading ? 'Generando...' : 'LBT completo'}
                 </button>
               ) : null}
-              {empresa === 'portones' ? (
-                <button className="btn btn-secondary" type="button" onClick={downloadEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
-                  {labelLoading ? 'Generando...' : 'LBX grande'}
-                </button>
-              ) : null}
+              <button className="btn btn-secondary" type="button" onClick={downloadEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
+                {labelLoading ? 'Generando...' : 'LBX grande'}
+              </button>
               {empresa === 'portones' ? (
                 <button className="btn btn-secondary" type="button" onClick={downloadSmallEditedLabelLbx} disabled={labelLoading || labelModalLabels.length === 0}>
                   {labelLoading ? 'Generando...' : 'LBX chico x4'}

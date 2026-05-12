@@ -4,7 +4,9 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const TEMPLATE_DIR = path.join(__dirname, 'assets', 'portones_lbx_template');
+const ASSETS_DIR = path.join(__dirname, 'assets');
+const TEMPLATE_DIR = path.join(ASSETS_DIR, 'portones_lbx_template');
+const IPANEL_LOGO_BMP_PATH = path.join(ASSETS_DIR, 'ipanel_logo.bmp');
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -189,6 +191,7 @@ function fmtDateDash(v) {
   const yyyy = d.getFullYear();
   return `${dd}-${mm}-${yyyy}`;
 }
+
 
 function wrapWords(value, maxChars = 12, maxLines = 2) {
   const source = clean(value);
@@ -378,6 +381,101 @@ function replaceDataRaw(xml, oldValue, newValue, plainValue = null) {
   });
 }
 
+
+function setMainLogoToIpanel(xml) {
+  return xml
+    .replace(/fileName="Object1\.emf"/g, 'fileName="ObjectIpanel.bmp"')
+    .replace(/originalName=""/g, 'originalName="ipanel_logo.bmp"');
+}
+
+function mainOnlyLabelXml(xml, height = 475.5) {
+  const objects = extractObjectFragments(xml).filter(isMainLabelObject);
+  const bgHeight = Math.max(1, Math.round((height - 16.9) * 10) / 10);
+
+  let out = xml;
+  out = out.replace(/<style:paper([^>]*?)height="[^"]+"([^>]*?)>/, (_m, before, after) => `<style:paper${before}height="${height}pt"${after}>`);
+  out = out.replace(/<style:cutLine[^>]*\/>/, '<style:cutLine regularCut="0pt" freeCut=""/>');
+  out = out.replace(/<style:backGround([^>]*?)height="[^"]+"([^>]*?)\/>/, (_m, before, after) => `<style:backGround${before}height="${bgHeight}pt"${after}/>`);
+  out = out.replace(/<pt:objects>[\s\S]*?<\/pt:objects>/, `<pt:objects>${objects.join('')}</pt:objects>`);
+  return out;
+}
+
+function ipanelLabelToXml(label) {
+  let xml = fs.readFileSync(path.join(TEMPLATE_DIR, 'label.xml'), 'utf8').replace(/\r\n/g, '\n');
+  xml = setMainLogoToIpanel(xml);
+
+  const product = wrapWords(upper(label.producto || label.revestimiento || 'NO'), 24, 5);
+  const productBlock = `PRODUCTO:\n${product}`;
+
+  const detailLines = [
+    ...pairLines('CLIENTE:', dash(upper(label.cliente || 'NO')), 34, 2),
+    ...pairLines('DIRECCION:', dash(upper(label.direccion || 'NO')), 34, 2),
+    ...pairLines('LOCALIDAD:', dash(upper(label.localidad || label.direccion2 || 'NO')), 34, 2),
+    `FECHA: ${dash(fmtDateDash(label.fechaVenta || label.fecha || new Date()))}`,
+  ].join('\n');
+
+  const vendedor = wrapWords(upper(label.comercializa || label.vendedor || 'NO'), 14, 3);
+
+  xml = replaceDataInTextObject(xml, 'N°3463/3309 ', nvDisplayText(label), (fragment) =>
+    setTextBox(fragment, { size: '31pt', orgPoint: '31pt', shrink: 'true', autoLF: 'true' })
+  );
+
+  xml = replaceDataInTextObject(xml, 'COLOR PIERNAS:\nREVESTIMIENTO:\nLISTON:\nPUERTA:\nLUCERA:\nACCIONAMIENTO:', productBlock, (fragment) =>
+    setTextAlign(setTextBox(fragment, {
+      x: '8pt',
+      y: '154pt',
+      width: '160pt',
+      height: '96pt',
+      size: '8.2pt',
+      orgPoint: '8.2pt',
+      shrink: 'true',
+      autoLF: 'true',
+    }), 'LEFT', 'CENTER')
+  );
+  xml = replaceDataInTextObject(xml, '-NEG MICRO\n-NEG MICRO\n-NO\n-NO\n-NO\n-AUT DERECHA', ' ', (fragment) =>
+    setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
+  );
+
+  xml = replaceDataInTextObject(xml, 'INSTALACIÓN', 'IPANELS', (fragment) =>
+    setTextBox(fragment, { size: '24pt', orgPoint: '24pt', shrink: 'true', autoLF: 'true' })
+  );
+
+  xml = replaceDataInTextObject(xml, 'DIRECCION:\nLOCALIDAD:\nCLIENTE:\nREFERENCIA:\nFECHA:', detailLines, (fragment) =>
+    setTextAlign(setTextBox(fragment, {
+      x: '8pt',
+      y: '298pt',
+      width: '160pt',
+      height: '78pt',
+      size: '6.9pt',
+      orgPoint: '6.9pt',
+      shrink: 'true',
+      autoLF: 'true',
+    }), 'LEFT', 'CENTER')
+  );
+  xml = replaceDataInTextObject(xml, '-\n-VILLA MARIA\n-POMILLO JOSE 2\n-\n-23/04/2026', ' ', (fragment) =>
+    setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
+  );
+
+  xml = replaceDataInTextObject(xml, 'COMERCIALIZA', 'VENDEDOR', (fragment) =>
+    setTextBox(fragment, { x: '8pt', width: '90pt', size: '8.5pt', orgPoint: '8.5pt' })
+  );
+
+  xml = replaceDataInTextObject(xml, 'BARENGO', vendedor, (fragment) => {
+    const lines = vendedor.split('\n').length;
+    const maxLen = Math.max(...vendedor.split('\n').map((line) => line.length));
+    const size = lines > 1 ? (maxLen > 14 ? 11 : 13) : (maxLen > 15 ? 14 : 17);
+    return setTextAlign(setTextBox(fragment, { x: '16pt', width: '143pt', height: '43pt', size: `${size}pt`, orgPoint: `${size}pt`, shrink: 'true', autoLF: 'true' }), 'CENTER', 'CENTER');
+  });
+
+  xml = replaceDataInTextObject(xml, 'MEDIDAS: 2980X2380', ' ', (fragment) =>
+    setTextBox(fragment, { width: '1pt', height: '1pt', size: '1pt', orgPoint: '1pt' })
+  );
+
+  xml = replaceDataRaw(xml, '267', ' ');
+  xml = makeTextResponsive(xml);
+  return mainOnlyLabelXml(xml);
+}
+
 function portonesLabelToXml(label) {
   let xml = fs.readFileSync(path.join(TEMPLATE_DIR, 'label.xml'), 'utf8').replace(/\r\n/g, '\n');
 
@@ -462,6 +560,19 @@ function portonesLabelToXml(label) {
 
   return xml;
 }
+
+
+export async function buildIpanelLabelLbx(label) {
+  const normalized = { ...(label || {}), brand: 'ipanel' };
+  const labelXml = ipanelLabelToXml(normalized);
+
+  return buildZip([
+    { name: 'label.xml', data: Buffer.from(labelXml, 'utf8') },
+    { name: 'prop.xml', data: fs.readFileSync(path.join(TEMPLATE_DIR, 'prop.xml')) },
+    { name: 'ObjectIpanel.bmp', data: fs.readFileSync(IPANEL_LOGO_BMP_PATH) },
+  ]);
+}
+
 
 export async function buildPortonesLabelLbx(label) {
   const normalized = { ...(label || {}), brand: 'portones' };
