@@ -391,10 +391,12 @@ function setMainLogoToIpanel(xml) {
 function mainOnlyLabelXml(xml, height = 475.5) {
   const objects = extractObjectFragments(xml).filter(isMainLabelObject);
   const bgHeight = Math.max(1, Math.round((height - 16.9) * 10) / 10);
+  const bottomCut = `${height}pt`;
 
   let out = xml;
   out = out.replace(/<style:paper([^>]*?)height="[^"]+"([^>]*?)>/, (_m, before, after) => `<style:paper${before}height="${height}pt"${after}>`);
-  out = out.replace(/<style:cutLine[^>]*\/>/, '<style:cutLine regularCut="0pt" freeCut=""/>');
+  // La QL usa cinta continua con cutter: agregamos el corte al final de la etiqueta grande.
+  out = out.replace(/<style:cutLine[^>]*\/>/, `<style:cutLine regularCut="0pt" freeCut="${bottomCut}"/>`);
   out = out.replace(/<style:backGround([^>]*?)height="[^"]+"([^>]*?)\/>/, (_m, before, after) => `<style:backGround${before}height="${bgHeight}pt"${after}/>`);
   out = out.replace(/<pt:objects>[\s\S]*?<\/pt:objects>/, `<pt:objects>${objects.join('')}</pt:objects>`);
   return out;
