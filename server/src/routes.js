@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
 import { buildRemitoPdf } from './pdf.js';
+import { fetchPreproduccionByNv } from './presupuestadorDb.js';
 
 const router = Router();
 
@@ -472,9 +473,28 @@ router.get('/remitos/search-by-nv', async (req, res) => {
     // Portones (default): NV -> NTASVTAS.factura -> IREMITOS.facnro -> REMITOS
     const factura = await fetchFacturaByNv(pool, nv);
 
-    // Si la NV no existe o no tiene factura asociada
+    // Si la NV no existe en SQL → buscar en el presupuestador nuevo (Supabase)
     if (!factura) {
-      return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+      const preproData = await fetchPreproduccionByNv(nv);
+      if (!preproData) {
+        return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+      }
+      const virtualItem = {
+        tipo: 'PP',
+        sucursal: 1,
+        numero: nv,
+        fecha: preproData.fecha_nv || new Date().toISOString(),
+        cliente: '',
+        nombre: preproData.nombre,
+        direccion: preproData.direccion,
+        localidad: preproData.localidad,
+        provincia: preproData.provincia,
+        cp: '',
+        anulado: null,
+        pendiente: null,
+        _fromPresupuestador: true,
+      };
+      return res.json({ nv, fromPresupuestador: true, items: [virtualItem] });
     }
 
     // Traemos remitos que tengan ítems con esa factura (facnro)
@@ -542,6 +562,49 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
 
   if (!tipo || sucursal === null || numero === null) {
     return res.status(400).json({ error: 'Invalid path params. Use /remitos/:tipo/:sucursal/:numero/pdf' });
+  }
+
+  // Tipo 'PP' = Presupuestador Portones: los datos vienen de Supabase, no de SQL Server
+  if (tipo === 'PP') {
+    try {
+      const preproData = await fetchPreproduccionByNv(numero);
+      if (!preproData) return res.status(404).json({ error: 'NV no encontrada en el presupuestador.' });
+
+      const header = {
+        tipo: 'PP',
+        sucursal: 1,
+        numero,
+        numerov: numero,
+        fecha: preproData.fecha_nv || new Date().toISOString(),
+        nombre: preproData.nombre,
+        direccion: preproData.direccion,
+        localidad: preproData.localidad,
+        provincia: preproData.provincia,
+        cliente: '',
+        cp: '',
+        iva: '',
+        cuit: '',
+        ibrutos: '',
+        operador: '',
+        observ: '',
+        ventas_observacion: preproData.note || '',
+      };
+
+      const items = preproData.nv_lines.map((l) => ({
+        producto: '',
+        cantidad: Number(l.qty) || 1,
+        descripcion: String(l.raw_name || l.name || '').trim(),
+      }));
+
+      const pdfBuffer = await buildRemitoPdf({ header, items });
+      const filename = `remito-PP-${numero}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      return res.send(pdfBuffer);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'PDF generation error', detail: String(err.message || err) });
+    }
   }
 
   try {

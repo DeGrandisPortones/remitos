@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
 import { buildCompletePortonesLabelLbx, buildIpanelLabelLbx, buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
+import { fetchPreproduccionByNv, buildFakePreProduccionRow } from './presupuestadorDb.js';
 
 const router = Router();
 
@@ -744,7 +745,13 @@ async function buildPortonesLabels(pool, nv) {
   const rows = await fetchPreProduccionPortonesByNv(pool, nv);
 
   if (!rows.length) {
-    return { error: 'No se encontro informacion en WebApp.dbo.Pre_Produccion para esa NV.' };
+    // Fallback: buscar en el presupuestador nuevo (Supabase preproduccion_valores)
+    const preproData = await fetchPreproduccionByNv(nv);
+    if (!preproData) {
+      return { error: 'No se encontro informacion en Pre_Produccion ni en el presupuestador para esa NV.' };
+    }
+    const fakeRow = buildFakePreProduccionRow(preproData);
+    return { labels: [toPortonPreProduccionLabel(fakeRow, nv, 1)] };
   }
 
   return {
