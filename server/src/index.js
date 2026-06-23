@@ -17,9 +17,18 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '';
 
 app.use(express.json({ limit: '1mb' }));
 
-// CORS for dev
+// CORS: acepta lista separada por comas en CLIENT_ORIGIN, o permite todo si está vacío
+const allowedOrigins = CLIENT_ORIGIN
+  ? CLIENT_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+  : [];
+
 app.use(cors({
-  origin: CLIENT_ORIGIN || true,
+  origin: allowedOrigins.length
+    ? (origin, cb) => {
+        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error(`CORS bloqueado: ${origin}`));
+      }
+    : true,
   credentials: false
 }));
 
