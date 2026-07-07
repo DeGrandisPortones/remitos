@@ -110,11 +110,13 @@ function extractRazSoc(note) {
 
 export function buildFakePreProduccionRow(preproData) {
   const lines = Array.isArray(preproData.nv_lines) ? preproData.nv_lines : [];
-  const dims = preproData.data?.dimensions || {};
+  const data = preproData.data || {};
+  const dims = data.dimensions || {};
 
+  // Medida final del portón (la aceptada por el cliente), no la medida de hoja/paso.
   // dimensions en mm: si es < 100 está en metros, si >= 100 ya está en mm
-  const anchoRaw = dims.hoja_ancho_mm ?? (dims.hoja_ancho_m != null ? dims.hoja_ancho_m : null);
-  const altoRaw  = dims.hoja_alto_mm  ?? (dims.hoja_alto_m  != null ? dims.hoja_alto_m  : null);
+  const anchoRaw = data.ancho_final_mm ?? dims.ancho_final_mm ?? (dims.hoja_ancho_m != null ? dims.hoja_ancho_m : null);
+  const altoRaw  = data.alto_final_mm  ?? dims.alto_final_mm  ?? (dims.hoja_alto_m  != null ? dims.hoja_alto_m  : null);
 
   return {
     Nombre:         preproData.nombre    || '',
