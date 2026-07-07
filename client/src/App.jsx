@@ -732,6 +732,9 @@ export default function App() {
               {labelModalLabels.map((label, labelIndex) => (
                 <div className="label-edit-card" key={`${label.nv || labelModalNv}-${labelIndex}`}>
                   <div className="label-edit-title">Etiqueta {labelIndex + 1}</div>
+                  {label.advertencia ? (
+                    <div className="label-warning">{label.advertencia}</div>
+                  ) : null}
                   <div className="label-edit-grid">
                     {labelFieldsFor(label).map((field) => (
                       <label className="label label-edit-field" key={field.key}>

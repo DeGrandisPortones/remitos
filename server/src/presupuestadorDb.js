@@ -106,6 +106,22 @@ function extractRazSoc(note) {
   return m ? m[1].trim() : '';
 }
 
+function toMmValue(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // valores < 100 vienen en metros (ej: 4.65), el resto ya esta en mm
+  return n < 100 ? Math.round(n * 1000) : Math.round(n);
+}
+
+function firstMm(...candidates) {
+  for (const c of candidates) {
+    const mm = toMmValue(c);
+    if (mm != null) return mm;
+  }
+  return null;
+}
+
 // ─── Construye un row compatible con toPortonPreProduccionLabel ───────────────
 
 export function buildFakePreProduccionRow(preproData) {
@@ -123,6 +139,37 @@ export function buildFakePreProduccionRow(preproData) {
     Direccion:      preproData.direccion || '',
     RazSoc:         extractRazSoc(preproData.note),
     Fecha_NV:       preproData.fecha_nv  || '',
+    Ancho:          anchoRaw,
+    Alto:           altoRaw,
+    Color_Sistema:  extractColorSistema(lines),
+    Color_Hoja:     extractColorHoja(lines),
+    Liston:         extractListon(lines),
+    PUERTA_Posicion: extractPuertaPosicion(lines),
+    Lucera:         extractLucera(lines),
+    MOTOR_Condicion: extractMotorCondicion(lines),
+    MOTOR_Posicion: extractMotorPosicion(lines),
+    Tipo_Embalaje:  extractTipoEmbalaje(lines),
+  };
+}
+
+// Fallback nivel 3: el portón todavía no entró a producción (no hay fila en
+// preproduccion_valores). Se arma la etiqueta con lo que haya en el presupuesto
+// original en presupuestador_quotes. Ancho/alto salen de dimensions.width/height
+// (medida CALCULADA del portón, ya con las reglas de vano aplicadas), nunca de
+// dimensions.vano_width/vano_height (la abertura en bruto).
+export function buildFakeQuoteRow(quoteData) {
+  const lines = Array.isArray(quoteData.lines) ? quoteData.lines : [];
+  const dims = quoteData.payload?.dimensions || {};
+  const endCustomer = quoteData.end_customer || {};
+
+  const anchoRaw = firstMm(dims.ancho_final_mm, dims.width_mm, dims.width, dims.ancho);
+  const altoRaw  = firstMm(dims.alto_final_mm, dims.height_mm, dims.height, dims.alto);
+
+  return {
+    Nombre:         String(endCustomer.name    || '').trim(),
+    Direccion:      String(endCustomer.address || '').trim(),
+    RazSoc:         extractRazSoc(quoteData.note),
+    Fecha_NV:       quoteData.created_at || '',
     Ancho:          anchoRaw,
     Alto:           altoRaw,
     Color_Sistema:  extractColorSistema(lines),
@@ -191,6 +238,43 @@ export async function fetchPreproduccionByNv(nv) {
     };
   } catch (err) {
     console.warn('[presupuestadorDb] fetchPreproduccionByNv error:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Busca directo en presupuestador_quotes (Supabase) por NV, para portones que
+ * todavia no entraron a produccion (no tienen fila en preproduccion_valores).
+ * Retorna null si no se encuentra nada.
+ */
+export async function fetchQuoteByNv(nv) {
+  const nvInt = Math.trunc(Number(nv));
+  if (!Number.isFinite(nvInt) || nvInt <= 0) return null;
+  const nvName = `NV${nvInt}`;
+
+  try {
+    const rows = await query(
+      `SELECT end_customer, note, lines, payload, created_at
+         FROM public.presupuestador_quotes
+        WHERE odoo_sale_order_name = $1
+           OR final_sale_order_name = $1
+        ORDER BY created_at DESC NULLS LAST
+        LIMIT 1`,
+      [nvName]
+    );
+
+    if (!rows.length) return null;
+    const row = rows[0];
+
+    return {
+      end_customer: row.end_customer || {},
+      note:         String(row.note || '').trim(),
+      lines:        Array.isArray(row.lines) ? row.lines : [],
+      payload:      row.payload || {},
+      created_at:   row.created_at || null,
+    };
+  } catch (err) {
+    console.warn('[presupuestadorDb] fetchQuoteByNv error:', err?.message || err);
     return null;
   }
 }

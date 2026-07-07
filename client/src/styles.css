@@ -372,6 +372,16 @@
   margin-bottom: 12px;
 }
 
+.label-warning {
+  background: #fff0f0;
+  border: 1px solid #ffb3b3;
+  color: #b91c1c;
+  font-weight: 800;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
 .label-edit-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

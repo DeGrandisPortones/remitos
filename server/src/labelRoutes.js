@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
 import { buildCompletePortonesLabelLbx, buildIpanelLabelLbx, buildPortonesLabelLbx, buildSmallPortonesLabelLbx } from './lbx.js';
-import { fetchPreproduccionByNv, buildFakePreProduccionRow } from './presupuestadorDb.js';
+import { fetchPreproduccionByNv, buildFakePreProduccionRow, fetchQuoteByNv, buildFakeQuoteRow } from './presupuestadorDb.js';
 
 const router = Router();
 
@@ -666,7 +666,7 @@ function splitAddress(value) {
   return { line1: line1 || s.slice(0, maxLen), line2: line2 || 'NO' };
 }
 
-function toPortonPreProduccionLabel(row, nv, index) {
+function toPortonPreProduccionLabel(row, nv, index, options = {}) {
   const medidas = formatMedidasMm(row);
   const direccion = prop(row, ['Direccion', 'Dirección', 'DIRECCION']);
   const direccionParts = splitAddress(direccion);
@@ -701,6 +701,7 @@ function toPortonPreProduccionLabel(row, nv, index) {
     calculadora: '',
     vendedor: '',
     carpinteria: '',
+    advertencia: options.advertencia || '',
   };
 }
 
@@ -747,11 +748,23 @@ async function buildPortonesLabels(pool, nv) {
   if (!rows.length) {
     // Fallback: buscar en el presupuestador nuevo (Supabase preproduccion_valores)
     const preproData = await fetchPreproduccionByNv(nv);
-    if (!preproData) {
+    if (preproData) {
+      const fakeRow = buildFakePreProduccionRow(preproData);
+      return { labels: [toPortonPreProduccionLabel(fakeRow, nv, 1)] };
+    }
+
+    // Fallback final: el porton todavia no entro a produccion, se usa el
+    // presupuesto original (presupuestador_quotes) con advertencia.
+    const quoteData = await fetchQuoteByNv(nv);
+    if (!quoteData) {
       return { error: 'No se encontro informacion en Pre_Produccion ni en el presupuestador para esa NV.' };
     }
-    const fakeRow = buildFakePreProduccionRow(preproData);
-    return { labels: [toPortonPreProduccionLabel(fakeRow, nv, 1)] };
+    const fakeQuoteRow = buildFakeQuoteRow(quoteData);
+    return {
+      labels: [toPortonPreProduccionLabel(fakeQuoteRow, nv, 1, {
+        advertencia: 'EL PORTON EN EL SISTEMA AUN NO INGRESO A PRODUCCION',
+      })],
+    };
   }
 
   return {
