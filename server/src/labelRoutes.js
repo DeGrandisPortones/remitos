@@ -62,6 +62,12 @@ function removeDigitsFromText(value) {
   return stripped || 'NO';
 }
 
+// Si no hay distribuidor cargado, el porton se comercializa directo por la empresa.
+function comercializaOrDefault(value) {
+  const s = removeDigitsFromText(value);
+  return s === 'NO' ? 'De Grandis Portones' : s;
+}
+
 function normalizeSqlDateInput(value) {
   const s = clean(value);
   if (!s || s.toLowerCase() === 'null' || s === 'NO') return '';
@@ -691,7 +697,7 @@ function toPortonPreProduccionLabel(row, nv, index, options = {}) {
     cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
     referencia: '',
     fecha: new Date(),
-    comercializa: removeDigitsFromText(prop(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social'])),
+    comercializa: comercializaOrDefault(prop(row, ['RazSoc', 'RAZSOC', 'Razon Social', 'Razón Social'])),
     medidas,
     numeroInterno: firstNonEmpty(nv, index),
     remitosPendientes: '',

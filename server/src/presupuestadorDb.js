@@ -90,13 +90,20 @@ function extractListon(lines) {
   return String(line.name || '').replace(/^List[oó]n\s*/i, '').trim() || 'NO';
 }
 
+// Producto "Instalacion" en el catalogo del presupuestador / Odoo (ID Presupuestador: 2865 · ID Odoo: 2865).
+const INSTALACION_PRODUCT_ID = 2865;
+
+function hasInstalacionProduct(lines) {
+  return lines.some(l => Number(l.product_id) === INSTALACION_PRODUCT_ID);
+}
+
 function extractTipoEmbalaje(lines) {
   const line = lines.find(l =>
     normLine(l.raw_name).includes('embalaje') ||
     normLine(l.name).includes('embalaj')
   );
   if (line) return String(line.name || '').trim() || 'NO';
-  const inst = lines.find(l => normLine(l.name).includes('con instalacion'));
+  const inst = hasInstalacionProduct(lines) || lines.some(l => normLine(l.name).includes('con instalacion'));
   return inst ? 'CON INSTALACION' : 'NO';
 }
 
