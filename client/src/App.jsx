@@ -228,6 +228,13 @@ export default function App() {
   }
 
   function openPdf(r) {
+    if (r._pendingClientApproval) {
+      const ok = window.confirm(
+        'El cliente final todavia no aprobo esta NV. El remito se va a armar con los datos del presupuesto (pueden cambiar). ¿Generar igual?'
+      );
+      if (!ok) return;
+    }
+
     let url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa });
     if (mode === 'nv' && String(numero).trim() !== '') {
       const sep = url.includes('?') ? '&' : '?';

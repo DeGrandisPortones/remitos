@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from './db.js';
 import { buildRemitoPdf } from './pdf.js';
-import { fetchPreproduccionByNv } from './presupuestadorDb.js';
+import { fetchPreproduccionByNv, fetchPreproduccionByNvIpanel, fetchQuoteByNv } from './presupuestadorDb.js';
 
 const router = Router();
 
@@ -264,6 +264,58 @@ async function fetchPanelesNtasvtasObservacion(pool, { nv, remitoNumero }) {
 }
 
 
+// La NV todavía no llegó al SQL legado (ni tiene factura/remito ahí).
+// Nivel 1: preproduccion_valores / preproduccion_valores_ipanels (Supabase) — se carga
+// recién cuando el cliente final aceptó el link de medición, momento en que el pedido
+// queda "apto para fabricar".
+// Nivel 2 (fallback): presupuestador_quotes — mientras el cliente no aceptó, igual
+// puede hacer falta remitar; usamos la misma info que ve el cliente en el link de
+// aceptación pendiente (nombre/dirección/líneas del presupuesto).
+function toPendingRemitoData(preproData) {
+  return {
+    pendingClientApproval: false,
+    nombre: preproData.nombre,
+    direccion: preproData.direccion,
+    localidad: preproData.localidad,
+    provincia: preproData.provincia,
+    fecha: preproData.fecha_nv || null,
+    note: preproData.note || '',
+    lines: preproData.nv_lines || [],
+  };
+}
+
+async function fetchPendingRemitoDataFromQuote(nv) {
+  const quoteData = await fetchQuoteByNv(nv);
+  if (!quoteData) return null;
+
+  const endCustomer = quoteData.end_customer || {};
+  return {
+    pendingClientApproval: true,
+    nombre: String(endCustomer.name || '').trim(),
+    direccion: String(endCustomer.address || '').trim(),
+    localidad: String(endCustomer.city || '').trim(),
+    // presupuestador_quotes.end_customer no guarda provincia por separado.
+    provincia: '',
+    fecha: quoteData.created_at || null,
+    note: quoteData.note || '',
+    lines: quoteData.lines || [],
+  };
+}
+
+// Portones / otros / plegados / puerta (comparten preproduccion_valores).
+async function fetchPendingRemitoDataByNv(nv) {
+  const preproData = await fetchPreproduccionByNv(nv);
+  if (preproData) return toPendingRemitoData(preproData);
+  return fetchPendingRemitoDataFromQuote(nv);
+}
+
+// iPanel (usa preproduccion_valores_ipanels en vez de preproduccion_valores).
+async function fetchPendingRemitoDataByNvIpanel(nv) {
+  const preproData = await fetchPreproduccionByNvIpanel(nv);
+  if (preproData) return toPendingRemitoData(preproData);
+  return fetchPendingRemitoDataFromQuote(nv);
+}
+
 async function fetchHeaderAndItems(pool, { tipo, sucursal, numero }) {
 
   async function fetchItems(queryInputs, whereSql) {
@@ -440,8 +492,35 @@ router.get('/remitos/search-by-nv', async (req, res) => {
     // Paneles: NV -> NTASVTAS.remito -> REMITOS/IREMITOS(numero)
     if (String(db).toLowerCase() === 'paneles') {
       const remito = await fetchRemitoByNvPaneles(pool, nv);
+
+      // Si la NV no existe en SQL (Paneles) → buscar en el presupuestador nuevo (Supabase)
       if (!remito) {
-        return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+        const pending = await fetchPendingRemitoDataByNvIpanel(nv);
+        if (!pending) {
+          return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+        }
+        const virtualItem = {
+          tipo: 'PP',
+          sucursal: 1,
+          numero: nv,
+          fecha: pending.fecha || new Date().toISOString(),
+          cliente: '',
+          nombre: pending.nombre,
+          direccion: pending.direccion,
+          localidad: pending.localidad,
+          provincia: pending.provincia,
+          cp: '',
+          anulado: null,
+          pendiente: pending.pendingClientApproval,
+          _fromPresupuestador: true,
+          _pendingClientApproval: pending.pendingClientApproval,
+        };
+        return res.json({
+          nv,
+          fromPresupuestador: true,
+          pendingClientApproval: pending.pendingClientApproval,
+          items: [virtualItem],
+        });
       }
 
       const r = await pool.request()
@@ -475,26 +554,32 @@ router.get('/remitos/search-by-nv', async (req, res) => {
 
     // Si la NV no existe en SQL → buscar en el presupuestador nuevo (Supabase)
     if (!factura) {
-      const preproData = await fetchPreproduccionByNv(nv);
-      if (!preproData) {
+      const pending = await fetchPendingRemitoDataByNv(nv);
+      if (!pending) {
         return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
       }
       const virtualItem = {
         tipo: 'PP',
         sucursal: 1,
         numero: nv,
-        fecha: preproData.fecha_nv || new Date().toISOString(),
+        fecha: pending.fecha || new Date().toISOString(),
         cliente: '',
-        nombre: preproData.nombre,
-        direccion: preproData.direccion,
-        localidad: preproData.localidad,
-        provincia: preproData.provincia,
+        nombre: pending.nombre,
+        direccion: pending.direccion,
+        localidad: pending.localidad,
+        provincia: pending.provincia,
         cp: '',
         anulado: null,
-        pendiente: null,
+        pendiente: pending.pendingClientApproval,
         _fromPresupuestador: true,
+        _pendingClientApproval: pending.pendingClientApproval,
       };
-      return res.json({ nv, fromPresupuestador: true, items: [virtualItem] });
+      return res.json({
+        nv,
+        fromPresupuestador: true,
+        pendingClientApproval: pending.pendingClientApproval,
+        items: [virtualItem],
+      });
     }
 
     // Traemos remitos que tengan ítems con esa factura (facnro)
@@ -564,22 +649,25 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
     return res.status(400).json({ error: 'Invalid path params. Use /remitos/:tipo/:sucursal/:numero/pdf' });
   }
 
-  // Tipo 'PP' = Presupuestador Portones: los datos vienen de Supabase, no de SQL Server
+  // Tipo 'PP' = Presupuestador (Portones/iPanel): los datos vienen de Supabase, no de SQL Server
   if (tipo === 'PP') {
     try {
-      const preproData = await fetchPreproduccionByNv(numero);
-      if (!preproData) return res.status(404).json({ error: 'NV no encontrada en el presupuestador.' });
+      const db = resolveDatabase(req);
+      const pending = String(db).toLowerCase() === 'paneles'
+        ? await fetchPendingRemitoDataByNvIpanel(numero)
+        : await fetchPendingRemitoDataByNv(numero);
+      if (!pending) return res.status(404).json({ error: 'NV no encontrada en el presupuestador.' });
 
       const header = {
         tipo: 'PP',
         sucursal: 1,
         numero,
         numerov: numero,
-        fecha: preproData.fecha_nv || new Date().toISOString(),
-        nombre: preproData.nombre,
-        direccion: preproData.direccion,
-        localidad: preproData.localidad,
-        provincia: preproData.provincia,
+        fecha: pending.fecha || new Date().toISOString(),
+        nombre: pending.nombre,
+        direccion: pending.direccion,
+        localidad: pending.localidad,
+        provincia: pending.provincia,
         cliente: '',
         cp: '',
         iva: '',
@@ -587,10 +675,10 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
         ibrutos: '',
         operador: '',
         observ: '',
-        ventas_observacion: preproData.note || '',
+        ventas_observacion: pending.note || '',
       };
 
-      const items = preproData.nv_lines.map((l) => ({
+      const items = pending.lines.map((l) => ({
         producto: '',
         cantidad: Number(l.qty) || 1,
         descripcion: String(l.raw_name || l.name || '').trim(),

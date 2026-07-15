@@ -104,7 +104,7 @@ function extractTipoEmbalaje(lines) {
   );
   if (line) return String(line.name || '').trim() || 'NO';
   const inst = hasInstalacionProduct(lines) || lines.some(l => normLine(l.name).includes('con instalacion'));
-  return inst ? 'CON INSTALACION' : 'NO';
+  return inst ? 'CON INSTALACION' : 'Despacho';
 }
 
 function extractRazSoc(note) {
@@ -192,55 +192,62 @@ export function buildFakeQuoteRow(quoteData) {
 
 // ─── Query principal ──────────────────────────────────────────────────────────
 
+// Prefijos reales de nv_tipo usados en Odoo (odoo_sale_order_name / final_sale_order_name):
+// NV = portón (también usado como default para "otros"/"plegados"/"puerta" cuando no
+// coincide ningún prefijo especial), INV = ipanel, ONV = otros, PLNV = plegados, PNV = puerta.
+const NV_TIPO_PREFIXES = ['NV', 'INV', 'ONV', 'PLNV', 'PNV'];
+
+function candidateNvNames(nvInt) {
+  return NV_TIPO_PREFIXES.map((prefix) => `${prefix}${nvInt}`);
+}
+
 /**
- * Busca en preproduccion_valores (Supabase) por NV.
- * Hace JOIN con presupuestador_quotes para obtener datos de cliente.
- * Retorna null si no se encuentra nada.
+ * Busca en preproduccion_valores (Supabase) por NV. Portón, otros, plegados y puerta
+ * comparten esta tabla (se distinguen por nv_tipo); ipanel usa preproduccion_valores_ipanels
+ * (ver fetchPreproduccionByNvIpanel). Los datos de cliente salen directo de pv.data
+ * (cliente_nombre/cliente_direccion/cliente_localidad), sin depender de ningún JOIN,
+ * así funciona sin importar el nv_tipo. Retorna null si no se encuentra nada.
  */
 export async function fetchPreproduccionByNv(nv) {
   const nvInt = Math.trunc(Number(nv));
   if (!Number.isFinite(nvInt) || nvInt <= 0) return null;
 
   try {
+    // (nv, nv_tipo) puede tener más de una fila para el mismo nv: además de las que
+    // carga el Presupuestador nuevo, un sync viejo (Integrador, desde el legado
+    // WebApp.dbo.Pre_Produccion) puede haber dejado otra fila con nv_tipo='NV' y sin
+    // nv_lines. Preferimos la fila que realmente tenga ítems cargados.
     const rows = await query(
-      `SELECT
-         pv.nv,
-         pv.nv_tipo,
-         pv.nv_lines,
-         pv.data,
-         pv.updated_at,
-         q.end_customer->>'name'     AS nombre,
-         q.end_customer->>'address'  AS direccion,
-         q.end_customer->>'locality' AS localidad,
-         q.end_customer->>'province' AS provincia,
-         q.note
-       FROM public.preproduccion_valores pv
-       LEFT JOIN public.presupuestador_quotes q
-         ON q.odoo_sale_order_name = 'NV' || pv.nv::text
-       WHERE pv.nv = $1
-       LIMIT 1`,
+      `SELECT nv, nv_tipo, nv_lines, data, updated_at
+         FROM public.preproduccion_valores
+        WHERE nv = $1 AND nv_tipo <> 'INV'
+        ORDER BY (jsonb_array_length(coalesce(nv_lines, '[]'::jsonb)) > 0) DESC, updated_at DESC
+        LIMIT 1`,
       [nvInt]
     );
 
     if (!rows.length) return null;
     const row = rows[0];
+    const data = row.data || {};
 
-    // fecha_nv desde data o fallback a updated_at
-    const fechaNv = row.data?.fecha_envio_produccion
-      || row.data?.Fecha_NV
-      || row.updated_at
-      || null;
+    // data trae 2 formatos posibles: el nuevo (cliente_nombre_completo/cliente_direccion,
+    // del Presupuestador) o el viejo (Nombre/Direccion/Fecha_NV, espejo de la fila legada
+    // de WebApp.dbo.Pre_Produccion). Probamos el nuevo primero y caemos al viejo.
+    const fechaNv = data.fecha_nv || data.Fecha_NV || row.updated_at || null;
+    const nombre = data.cliente_nombre_completo || data.cliente_nombre || data.Nombre || '';
+    const direccion = data.cliente_direccion || data.Direccion || '';
 
     return {
       nv:        row.nv,
       nv_tipo:   row.nv_tipo,
       nv_lines:  Array.isArray(row.nv_lines) ? row.nv_lines : [],
-      data:      row.data || {},
-      nombre:    String(row.nombre    || '').trim(),
-      direccion: String(row.direccion || '').trim(),
-      localidad: String(row.localidad || '').trim(),
-      provincia: String(row.provincia || '').trim(),
-      note:      String(row.note      || '').trim(),
+      data,
+      nombre:    String(nombre || '').trim(),
+      direccion: String(direccion || '').trim(),
+      localidad: String(data.cliente_localidad || '').trim(),
+      // presupuestador_quotes.end_customer no guarda provincia por separado.
+      provincia: '',
+      note:      '',
       fecha_nv:  fechaNv,
     };
   } catch (err) {
@@ -250,24 +257,67 @@ export async function fetchPreproduccionByNv(nv) {
 }
 
 /**
- * Busca directo en presupuestador_quotes (Supabase) por NV, para portones que
- * todavia no entraron a produccion (no tienen fila en preproduccion_valores).
+ * Equivalente a fetchPreproduccionByNv pero para iPanel, que usa una tabla propia
+ * (preproduccion_valores_ipanels) en vez de preproduccion_valores.
+ */
+export async function fetchPreproduccionByNvIpanel(nv) {
+  const nvInt = Math.trunc(Number(nv));
+  if (!Number.isFinite(nvInt) || nvInt <= 0) return null;
+
+  try {
+    const rows = await query(
+      `SELECT nv, partida, fecha_nv, descripcion, descripcion_simple, data, updated_at
+         FROM public.preproduccion_valores_ipanels
+        WHERE nv = $1
+        LIMIT 1`,
+      [nvInt]
+    );
+
+    if (!rows.length) return null;
+    const row = rows[0];
+    const data = row.data || {};
+    const nombre = data.cliente_nombre_completo || data.cliente_nombre || '';
+
+    return {
+      nv:        row.nv,
+      nv_tipo:   'INV',
+      nv_lines:  Array.isArray(data.lines) ? data.lines : [],
+      data,
+      nombre:    String(nombre || '').trim(),
+      direccion: String(data.cliente_direccion || '').trim(),
+      localidad: String(data.cliente_localidad || '').trim(),
+      provincia: '',
+      note:      '',
+      fecha_nv:  row.fecha_nv || row.updated_at || null,
+    };
+  } catch (err) {
+    console.warn('[presupuestadorDb] fetchPreproduccionByNvIpanel error:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Busca directo en presupuestador_quotes (Supabase) por NV, para pedidos que
+ * todavia no entraron a produccion (no tienen fila en preproduccion_valores ni
+ * preproduccion_valores_ipanels) — típicamente porque el cliente final aún no
+ * aceptó el link de medición. Prueba los 5 prefijos posibles (NV/INV/ONV/PLNV/PNV)
+ * porque a esta altura no sabemos el catalog_kind, solo el número de NV.
  * Retorna null si no se encuentra nada.
  */
 export async function fetchQuoteByNv(nv) {
   const nvInt = Math.trunc(Number(nv));
   if (!Number.isFinite(nvInt) || nvInt <= 0) return null;
-  const nvName = `NV${nvInt}`;
+  const candidates = candidateNvNames(nvInt);
 
   try {
     const rows = await query(
       `SELECT end_customer, note, lines, payload, created_at
          FROM public.presupuestador_quotes
-        WHERE odoo_sale_order_name = $1
-           OR final_sale_order_name = $1
+        WHERE odoo_sale_order_name = ANY($1::text[])
+           OR final_sale_order_name = ANY($1::text[])
         ORDER BY created_at DESC NULLS LAST
         LIMIT 1`,
-      [nvName]
+      [candidates]
     );
 
     if (!rows.length) return null;
