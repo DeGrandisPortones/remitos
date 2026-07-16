@@ -28,27 +28,27 @@ async function fetchFacturaByNv(pool, nv) {
   // Probamos distintos queries para ser tolerantes a schema.
   const attempts = [
     {
-      name: 'NTASVTAS(numero,factura,fecha)',
+      name: 'NTASVTAS(numero,factura,remito,cliente,fecha)',
       sql: `
-        SELECT TOP (10) numero, factura, fecha
+        SELECT TOP (10) numero, factura, remito, cliente, fecha
         FROM dbo.NTASVTAS
         WHERE numero = @nv
         ORDER BY fecha DESC;
       `
     },
     {
-      name: 'NTASVTAS(numero,factura,cfecha)',
+      name: 'NTASVTAS(numero,factura,remito,cliente,cfecha)',
       sql: `
-        SELECT TOP (10) numero, factura, cfecha
+        SELECT TOP (10) numero, factura, remito, cliente, cfecha
         FROM dbo.NTASVTAS
         WHERE numero = @nv
         ORDER BY cfecha DESC;
       `
     },
     {
-      name: 'NTASVTAS(numero,factura)',
+      name: 'NTASVTAS(numero,factura,remito,cliente)',
       sql: `
-        SELECT TOP (10) numero, factura
+        SELECT TOP (10) numero, factura, remito, cliente
         FROM dbo.NTASVTAS
         WHERE numero = @nv;
       `
@@ -63,7 +63,18 @@ async function fetchFacturaByNv(pool, nv) {
 
       const rows = r.recordset || [];
       const first = rows.find(x => x?.factura !== null && x?.factura !== undefined);
-      if (first) return first.factura;
+      if (!first) continue;
+
+      // NTASVTAS.remito es la confirmación directa de que esta NV ya fue remitada.
+      // Si vino en el resultado y está en null, no confiamos en `factura`: puede
+      // haber quedado con un número viejo/reciclado de otra NV (visto en producción:
+      // NTASVTAS.factura duplicado entre dos NV distintas), lo que hacía traer un
+      // remito de otra venta completamente distinta.
+      if ('remito' in first && (first.remito === null || first.remito === undefined)) {
+        return null;
+      }
+
+      return { factura: first.factura, cliente: first.cliente ?? null };
     } catch (_) {
       // try next attempt
       continue;
@@ -550,10 +561,9 @@ router.get('/remitos/search-by-nv', async (req, res) => {
     }
 
     // Portones (default): NV -> NTASVTAS.factura -> IREMITOS.facnro -> REMITOS
-    const factura = await fetchFacturaByNv(pool, nv);
+    const facturaInfo = await fetchFacturaByNv(pool, nv);
 
-    // Si la NV no existe en SQL → buscar en el presupuestador nuevo (Supabase)
-    if (!factura) {
+    async function fallbackToPresupuestador() {
       const pending = await fetchPendingRemitoDataByNv(nv);
       if (!pending) {
         return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
@@ -582,6 +592,13 @@ router.get('/remitos/search-by-nv', async (req, res) => {
       });
     }
 
+    // Si la NV no existe en SQL → buscar en el presupuestador nuevo (Supabase)
+    if (!facturaInfo) {
+      return await fallbackToPresupuestador();
+    }
+
+    const { factura, cliente: nvCliente } = facturaInfo;
+
     // Traemos remitos que tengan ítems con esa factura (facnro)
     const r = await pool.request()
       .input('factura', sql.Int, Number(factura))
@@ -605,9 +622,18 @@ router.get('/remitos/search-by-nv', async (req, res) => {
         ORDER BY r.fecha DESC;
       `);
 
-    const items = r.recordset || [];
+    let items = r.recordset || [];
+
+    // El número de factura puede estar reciclado entre NV distintas (visto en
+    // producción). Si sabemos el cliente de la NV, descartamos remitos de un
+    // cliente distinto: mostrar el remito de otra venta es peor que no mostrar nada.
+    const nvClienteTrim = typeof nvCliente === 'string' ? nvCliente.trim() : nvCliente;
+    if (nvClienteTrim) {
+      items = items.filter((it) => String(it?.cliente ?? '').trim() === nvClienteTrim);
+    }
+
     if (items.length === 0) {
-      return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
+      return await fallbackToPresupuestador();
     }
 
     return res.json({ nv, factura: Number(factura), items });
