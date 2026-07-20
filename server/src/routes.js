@@ -292,6 +292,9 @@ function toPendingRemitoData(preproData) {
     fecha: preproData.fecha_nv || null,
     note: preproData.note || '',
     lines: preproData.nv_lines || [],
+    // NV que nunca pasó por el Presupuestador nuevo: los ítems son un resumen
+    // armado con los datos técnicos de Pre-Producción, no el detalle real del pedido.
+    linesAreSynthesized: !!preproData.linesAreSynthesized,
   };
 }
 
@@ -310,6 +313,7 @@ async function fetchPendingRemitoDataFromQuote(nv) {
     fecha: quoteData.created_at || null,
     note: quoteData.note || '',
     lines: quoteData.lines || [],
+    linesAreSynthesized: false,
   };
 }
 
@@ -522,14 +526,16 @@ router.get('/remitos/search-by-nv', async (req, res) => {
           provincia: pending.provincia,
           cp: '',
           anulado: null,
-          pendiente: pending.pendingClientApproval,
+          pendiente: pending.pendingClientApproval || pending.linesAreSynthesized,
           _fromPresupuestador: true,
           _pendingClientApproval: pending.pendingClientApproval,
+          _linesAreSynthesized: pending.linesAreSynthesized,
         };
         return res.json({
           nv,
           fromPresupuestador: true,
           pendingClientApproval: pending.pendingClientApproval,
+          linesAreSynthesized: pending.linesAreSynthesized,
           items: [virtualItem],
         });
       }
@@ -580,14 +586,16 @@ router.get('/remitos/search-by-nv', async (req, res) => {
         provincia: pending.provincia,
         cp: '',
         anulado: null,
-        pendiente: pending.pendingClientApproval,
+        pendiente: pending.pendingClientApproval || pending.linesAreSynthesized,
         _fromPresupuestador: true,
         _pendingClientApproval: pending.pendingClientApproval,
+        _linesAreSynthesized: pending.linesAreSynthesized,
       };
       return res.json({
         nv,
         fromPresupuestador: true,
         pendingClientApproval: pending.pendingClientApproval,
+        linesAreSynthesized: pending.linesAreSynthesized,
         items: [virtualItem],
       });
     }

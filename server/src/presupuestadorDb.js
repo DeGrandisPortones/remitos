@@ -190,6 +190,34 @@ export function buildFakeQuoteRow(quoteData) {
   };
 }
 
+// Algunas filas de preproduccion_valores son solo un espejo del legado
+// WebApp.dbo.Pre_Produccion (sincronizado por Integrador) para NV que nunca
+// pasaron por el Presupuestador nuevo: no tienen nv_lines (llega null/[]) pero
+// sí tienen los campos técnicos ya calculados (Sistema, Color, Liston, etc.).
+// Armamos un ítem resumen con esos datos en vez de dejar el remito sin ítems.
+function synthesizeLegacyLines(data) {
+  const sistema = String(data?.Sistema || '').trim();
+  if (!sistema) return [];
+
+  const color = String(data?.Color_Sistema || data?.Color || '').trim();
+  const revestimiento = String(data?.Revestimiento || data?.Color_Hoja || '').trim();
+  const liston = String(data?.Liston || '').trim();
+  const embalaje = String(data?.Tipo_Embalaje || '').trim();
+
+  const detalle = [
+    color && `Color: ${color}`,
+    revestimiento && `Revestimiento: ${revestimiento}`,
+    liston && liston !== 'NO' && `Listón: ${liston}`,
+    embalaje && `Embalaje: ${embalaje}`,
+  ].filter(Boolean).join('. ');
+
+  return [{
+    name: sistema,
+    raw_name: [sistema, detalle].filter(Boolean).join('. '),
+    qty: 1,
+  }];
+}
+
 // ─── Query principal ──────────────────────────────────────────────────────────
 
 // Prefijos reales de nv_tipo usados en Odoo (odoo_sale_order_name / final_sale_order_name):
@@ -237,10 +265,15 @@ export async function fetchPreproduccionByNv(nv) {
     const nombre = data.cliente_nombre_completo || data.cliente_nombre || data.Nombre || '';
     const direccion = data.cliente_direccion || data.Direccion || '';
 
+    const realLines = Array.isArray(row.nv_lines) ? row.nv_lines : [];
+    const isSynthesized = realLines.length === 0;
+    const nvLines = isSynthesized ? synthesizeLegacyLines(data) : realLines;
+
     return {
       nv:        row.nv,
       nv_tipo:   row.nv_tipo,
-      nv_lines:  Array.isArray(row.nv_lines) ? row.nv_lines : [],
+      nv_lines:  nvLines,
+      linesAreSynthesized: isSynthesized && nvLines.length > 0,
       data,
       nombre:    String(nombre || '').trim(),
       direccion: String(direccion || '').trim(),

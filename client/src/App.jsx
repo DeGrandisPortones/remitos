@@ -233,6 +233,11 @@ export default function App() {
         'El cliente final todavia no aprobo esta NV. El remito se va a armar con los datos del presupuesto (pueden cambiar). ¿Generar igual?'
       );
       if (!ok) return;
+    } else if (r._linesAreSynthesized) {
+      const ok = window.confirm(
+        'Esta NV no tiene el detalle de items cargado (viene de Pre-Producción, no del Presupuestador). El remito se va a armar con un resumen general, no con el detalle real del pedido. ¿Generar igual?'
+      );
+      if (!ok) return;
     }
 
     let url = pdfUrlForRemito({ tipo: r.tipo, sucursal: r.sucursal, numero: r.numero, empresa });
