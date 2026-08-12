@@ -275,13 +275,87 @@ async function fetchPanelesNtasvtasObservacion(pool, { nv, remitoNumero }) {
 }
 
 
-// La NV todavía no llegó al SQL legado (ni tiene factura/remito ahí).
-// Nivel 1: preproduccion_valores / preproduccion_valores_ipanels (Supabase) — se carga
-// recién cuando el cliente final aceptó el link de medición, momento en que el pedido
-// queda "apto para fabricar".
+// La NV todavía no tiene remito confirmado en el SQL legado (NTASVTAS.remito IS NULL).
+// Nivel 0: la NV YA está cargada en el SQL legado (NTASVTAS/INTASVTAS) aunque todavía
+// no se emitió el remito — este es el caso más común y es el pedido real tal cual se
+// vendió (productos, cantidades y descripciones reales desde INTASVTAS+PRODUCTOS).
+// Nivel 1 (fallback): preproduccion_valores / preproduccion_valores_ipanels (Supabase) —
+// se carga recién cuando el cliente final aceptó el link de medición, momento en que el
+// pedido queda "apto para fabricar". Si la fila es solo un espejo del legado sin
+// nv_lines reales, se arma un resumen sintético a partir de los campos técnicos.
 // Nivel 2 (fallback): presupuestador_quotes — mientras el cliente no aceptó, igual
 // puede hacer falta remitar; usamos la misma info que ve el cliente en el link de
 // aceptación pendiente (nombre/dirección/líneas del presupuesto).
+async function fetchPortonesNvFromLegacySql(pool, nv) {
+  try {
+    const headerR = await pool.request()
+      .input('nv', sql.Int, nv)
+      .query(`
+        SELECT TOP 1 fecha, nombre, direccion, localidad, provincia, observ, dirent
+        FROM dbo.NTASVTAS
+        WHERE numero = @nv
+        ORDER BY fecha DESC;
+      `);
+
+    const header = headerR.recordset?.[0];
+    if (!header) return null;
+
+    const itemsR = await pool.request()
+      .input('nv', sql.Int, nv)
+      .query(`
+        SELECT i.producto, i.cantidad, p.descripcion
+        FROM dbo.INTASVTAS i
+        LEFT JOIN dbo.PRODUCTOS p ON p.codigo = i.producto
+        WHERE i.numero = @nv
+        ORDER BY i.producto;
+      `);
+
+    const lines = (itemsR.recordset || []).map((it) => {
+      const producto = String(it.producto || '').trim();
+      const descripcion = String(it.descripcion || '').trim() || producto;
+      return {
+        producto,
+        qty: Number(it.cantidad) || 1,
+        name: descripcion,
+        raw_name: descripcion,
+      };
+    });
+
+    if (lines.length === 0) return null;
+
+    // El destinatario real (cliente final) suele venir en observ/dirent, distinto
+    // del titular de cuenta (nombre/direccion) cuando compra un distribuidor.
+    const nombre = String(header.observ || '').trim() || String(header.nombre || '').trim();
+    const direccion = String(header.dirent || '').trim() || String(header.direccion || '').trim();
+
+    return {
+      nombre,
+      direccion,
+      localidad: direccion ? '' : String(header.localidad || '').trim(),
+      provincia: String(header.provincia || '').trim(),
+      fecha: header.fecha || null,
+      lines,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function toPendingRemitoDataFromLegacySql(legacyData) {
+  return {
+    pendingClientApproval: false,
+    nombre: legacyData.nombre,
+    direccion: legacyData.direccion,
+    localidad: legacyData.localidad,
+    provincia: legacyData.provincia,
+    fecha: legacyData.fecha,
+    note: '',
+    lines: legacyData.lines,
+    // Ítems reales desde INTASVTAS, no un resumen armado.
+    linesAreSynthesized: false,
+  };
+}
+
 function toPendingRemitoData(preproData) {
   return {
     pendingClientApproval: false,
@@ -318,7 +392,10 @@ async function fetchPendingRemitoDataFromQuote(nv) {
 }
 
 // Portones / otros / plegados / puerta (comparten preproduccion_valores).
-async function fetchPendingRemitoDataByNv(nv) {
+async function fetchPendingRemitoDataByNv(pool, nv) {
+  const legacyData = await fetchPortonesNvFromLegacySql(pool, nv);
+  if (legacyData) return toPendingRemitoDataFromLegacySql(legacyData);
+
   const preproData = await fetchPreproduccionByNv(nv);
   if (preproData) return toPendingRemitoData(preproData);
   return fetchPendingRemitoDataFromQuote(nv);
@@ -570,7 +647,7 @@ router.get('/remitos/search-by-nv', async (req, res) => {
     const facturaInfo = await fetchFacturaByNv(pool, nv);
 
     async function fallbackToPresupuestador() {
-      const pending = await fetchPendingRemitoDataByNv(nv);
+      const pending = await fetchPendingRemitoDataByNv(pool, nv);
       if (!pending) {
         return res.status(404).json({ error: 'La NV ingresada no tiene remito aún.' });
       }
@@ -683,13 +760,15 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
     return res.status(400).json({ error: 'Invalid path params. Use /remitos/:tipo/:sucursal/:numero/pdf' });
   }
 
-  // Tipo 'PP' = Presupuestador (Portones/iPanel): los datos vienen de Supabase, no de SQL Server
+  // Tipo 'PP' = NV sin remito confirmado: primero SQL legado (NTASVTAS/INTASVTAS),
+  // si no está ahí cae a Supabase (Pre-Producción / Presupuestador nuevo).
   if (tipo === 'PP') {
     try {
       const db = resolveDatabase(req);
-      const pending = String(db).toLowerCase() === 'paneles'
+      const isPaneles = String(db).toLowerCase() === 'paneles';
+      const pending = isPaneles
         ? await fetchPendingRemitoDataByNvIpanel(numero)
-        : await fetchPendingRemitoDataByNv(numero);
+        : await fetchPendingRemitoDataByNv(await getPool(db), numero);
       if (!pending) return res.status(404).json({ error: 'NV no encontrada en el presupuestador.' });
 
       const header = {
@@ -713,7 +792,7 @@ router.get('/remitos/:tipo/:sucursal/:numero/pdf', async (req, res) => {
       };
 
       const items = pending.lines.map((l) => ({
-        producto: '',
+        producto: String(l.producto || '').trim(),
         cantidad: Number(l.qty) || 1,
         descripcion: String(l.raw_name || l.name || '').trim(),
       }));
