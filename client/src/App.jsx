@@ -27,7 +27,7 @@ const PORTONES_LABEL_FIELDS = [
   { key: 'tarea', label: 'Instalacion / Embalaje' },
   { key: 'fechaVenta', label: 'Fecha de venta', type: 'date' },
   { key: 'direccion', label: 'Direccion linea 1' },
-  { key: 'direccion2', label: 'Direccion linea 2' },
+  { key: 'direccion2', label: 'Localidad (linea 2)' },
   { key: 'cliente', label: 'Cliente' },
   { key: 'fecha', label: 'Fecha', type: 'date' },
   { key: 'comercializa', label: 'Comercializa' },

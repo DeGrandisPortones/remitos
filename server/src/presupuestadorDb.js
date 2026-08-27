@@ -144,6 +144,7 @@ export function buildFakePreProduccionRow(preproData) {
   return {
     Nombre:         preproData.nombre    || '',
     Direccion:      preproData.direccion || '',
+    Localidad:      preproData.localidad || '',
     RazSoc:         extractRazSoc(preproData.note),
     Fecha_NV:       preproData.fecha_nv  || '',
     Ancho:          anchoRaw,
@@ -175,6 +176,7 @@ export function buildFakeQuoteRow(quoteData) {
   return {
     Nombre:         String(endCustomer.name    || '').trim(),
     Direccion:      String(endCustomer.address || '').trim(),
+    Localidad:      String(endCustomer.city    || '').trim(),
     RazSoc:         extractRazSoc(quoteData.note),
     Fecha_NV:       quoteData.created_at || '',
     Ancho:          anchoRaw,

@@ -676,6 +676,11 @@ function toPortonPreProduccionLabel(row, nv, index, options = {}) {
   const medidas = formatMedidasMm(row);
   const direccion = prop(row, ['Direccion', 'Dirección', 'DIRECCION']);
   const direccionParts = splitAddress(direccion);
+  // Solo viene poblado para NV que salen del presupuestador nuevo (Supabase),
+  // via buildFakePreProduccionRow/buildFakeQuoteRow. Las filas del legado
+  // WebApp.dbo.Pre_Produccion no tienen esta columna, asi que ahi se mantiene
+  // el comportamiento viejo (linea 2 = resto de la direccion).
+  const localidad = clean(pick(row, ['Localidad', 'localidad', 'LOCALIDAD']));
   const motorCondicion = shortMotorCondicion(pick(row, ['MOTOR_Condicion', 'Motor Condicion', 'MOTOR CONDICION']));
   const motorPosicion = prop(row, ['MOTOR_Posicion', 'Motor Posicion', 'MOTOR POSICION']);
   const accionamiento = `${motorCondicion} ${motorPosicion}`.trim();
@@ -693,7 +698,8 @@ function toPortonPreProduccionLabel(row, nv, index, options = {}) {
     tarea: prop(row, ['Tipo_Embalaje', 'Tipo Embalaje', 'TIPO_EMBALAJE']),
     fechaVenta: pickFechaVenta(row),
     direccion: direccionParts.line1,
-    direccion2: direccionParts.line2,
+    direccion2: localidad || direccionParts.line2,
+    localidad: localidad ? localidad : 'NO',
     cliente: prop(row, ['Nombre', 'NOMBRE', 'nombre']),
     referencia: '',
     fecha: new Date(),
